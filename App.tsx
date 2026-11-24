@@ -317,7 +317,7 @@ export default function App() {
       <Text style={styles.note}>RJ schedules local Android notifications. Delivery time can still be affected by Android battery and alarm settings.</Text>
       <View style={styles.divider} />
       <Text style={styles.sectionTitle}>Saved reminders</Text>
-      {reminders.length === 0 ? <Text style={styles.muted}>Nothing scheduled yet.</Text> : reminders.map((r, i) => <Text key={i} style={styles.listLine}>• {r}</Text>)}
+      {reminders.length === 0 ? <Text style={styles.muted}>Nothing scheduled yet.</Text> : reminders.map(r => <Text key={r.id} style={styles.listLine}>• {r.title} • {r.time}</Text>)}
     </View>
   );
 
