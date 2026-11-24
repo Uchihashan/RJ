@@ -197,8 +197,9 @@ export default function App() {
 
   useEffect(() => {
     if (!session || !supabase) return;
+    const client = supabase;
     let active = true;
-    supabase.rpc("rj_provider_status").then(({ data, error }) => {
+    client.rpc("rj_provider_status").then(({ data, error }) => {
       if (!active || error || !data) return;
       const next: Record<string, boolean> = {};
       for (const item of data as { provider: string; configured: boolean }[]) next[item.provider] = item.configured;
@@ -209,9 +210,10 @@ export default function App() {
 
   useEffect(() => {
     if (!session || !supabase) return;
+    const client = supabase;
     let active = true;
     const refreshJobs = async () => {
-      const { data, error } = await supabase.from("jobs")
+      const { data, error } = await client.from("jobs")
         .select("id,input,status,created_at,output,error_code")
         .eq("user_id", session.user.id)
         .eq("job_type", "video_generation")
