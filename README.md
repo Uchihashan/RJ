@@ -21,7 +21,7 @@ RJ is a personal-use Android app with a fixed **black + red** visual identity. T
 - Durable `pgmq` queue `rj_jobs`, database enqueue trigger, and a Supabase Edge Function worker deployed as `rj-worker`.
 - Supabase Cron invokes the worker every minute; a random worker token is stored encrypted in Supabase Vault.
 - Per-user Gemini and OpenRouter API keys are stored encrypted in Vault through authenticated RPCs; keys are never returned to the app.
-- Story worker tries Gemini first, then OpenRouter's `openrouter/free` route. It does not automatically call paid models.
+- Story worker tries Gemini 3.5 Flash-Lite through the current Interactions API first, then OpenRouter's `openrouter/free` route. It does not automatically call paid models.
 - Quota/rate-limit and transient failures are recorded in `job_attempts`; jobs are delayed and retried. Jobs paused for missing provider keys automatically resume after a key is saved.
 - Database migrations and Edge Function source are tracked under `supabase/`.
 - Supabase email account creation/sign-in with persisted sessions stored through Expo SecureStore.
@@ -34,7 +34,7 @@ RJ is a personal-use Android app with a fixed **black + red** visual identity. T
 ## Current AI pipeline boundary
 - The background worker and free-first story provider adapters are deployed, but real provider calls are not yet verified because no provider API keys have been added.
 - Once a key is saved in RJ Settings, the worker can generate and save the story script. Story-ready jobs are paused at the next stage until voice, visuals and rendering are implemented.
-- Gemini and OpenRouter free usage have changing quotas and availability. OpenRouter's free router is rate-limited; it is not unlimited free compute.
+- Gemini and OpenRouter free usage have changing quotas and availability. OpenRouter's free plan currently limits free-model requests to 50/day and 20/minute before any credit purchase; this is not unlimited free compute. Gemini free-tier prompts may be used by Google to improve its products, so do not submit sensitive personal data.
 
 ## Not connected yet
 These are deliberately shown as pending rather than faked:
