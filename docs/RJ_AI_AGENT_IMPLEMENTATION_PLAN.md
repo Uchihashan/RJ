@@ -22,11 +22,14 @@ The separate RJ Supabase backend already contains RLS-protected profile, setting
 
 1. **RJ conversation gateway** — authenticated Supabase Edge Function receives Tamil, Tanglish, and English messages, loads only the signed-in user's permitted context, and calls the configured free-first model provider from server-side Vault credentials.
 2. **Structured agent decisions** — model output is validated against a strict action schema. Ordinary answers return as messages; tasks become durable jobs; unsafe or external side effects are never executed from free-form model text.
-3. **Permission-controlled tools** — read-only tasks may run within the user's granted scope. Actions such as YouTube upload, publish, delete, or account changes require an explicit confirmation in the app immediately before execution.
-4. **Durable execution** — all long-running work is recorded in RJ's queue, with idempotency keys, progress stages, retry/backoff, cancellation, and visible error states.
-5. **YouTube connection** — OAuth authorization uses the user's own Google account. Refresh tokens remain server-side and encrypted; publishing follows the user's configured privacy/scheduling policy.
-6. **Creator pipeline** — story/script → Tamil voice-over → scene assets → subtitle timing → render → user review → YouTube upload/schedule. Each stage stores its output and can resume after interruption.
-7. **Audit and security** — RLS for user-owned records, server-only secrets, validated tool inputs, rate limits, action audit records, and no reuse of NOOR credentials or database.
+3. **Permission-controlled tools** — read-only tasks may run within the user's granted scope. Actions such as YouTube upload, publish, delete, account changes, connecting a new provider, or spending paid credits require clear user consent at the appropriate point.
+4. **Dynamic Tool Hub / integrations** — RJ includes an in-app catalogue where the user can search, connect, configure, test, pause, and disconnect tools/services. It must support a growing adapter model rather than a hard-coded list: coding/development tools, Google services, AI model providers, image/video/audio generation, storage, publishing, and future MCP/API integrations. Show each integration's capabilities, permissions, pricing/free-tier notes where verifiable, connection state, and required setup. The agent can recommend a tool for a task and guide the user through OAuth/API-key setup without asking for passwords in chat. Credentials are stored encrypted server-side and scoped per user. Unknown tools are not silently trusted: validate manifests, scopes, endpoints, and permissions before enabling them.
+5. **Google Flow / Google video provider support** — expose a Google video integration inside RJ's Tool Hub and creator workflow. The user must remain in RJ's UI: no forced navigation to the Flow website/app and no “open Flow to finish” step. Before implementation, verify Google's currently supported official developer interfaces and account/region/plan restrictions. Google's Flow product is a consumer creative studio; do not assume Flow's own credits or private website features are callable from an app API. If no official Flow API is available, use an official supported Google video-generation API (for example, Gemini/Veo where available) behind the same provider adapter, and label it accurately as Google video generation rather than claiming it is the Flow API. Do not use fragile browser-cookie scraping or unofficial account automation. If an authorized supported Flow connector/API becomes available, it can be added without changing the in-app workflow.
+6. **In-app video creation experience** — a user can type a prompt or request a video in RJ chat; RJ plans the job, asks only for essential missing details, shows an editable preview of the plan, then runs the pipeline in the background. The user stays in the RJ APK and sees progress, stages, generated previews, errors, retry/cancel controls, and the final video. The pipeline is: brief/prompt → script/storyboard → scene/image/video generation → Tamil voice-over → subtitles/captions → assembly/render → quality preview → user approval → publish/upload. Store outputs in the user's RJ project and storage; allow download/share from inside RJ. Do not hand the user off to an external editing website to complete the job.
+7. **Provider routing and cost controls** — define capability-based adapters (text, image, video, speech, transcription, rendering, storage, publishing). Route each stage to the best connected provider that meets the user's quality, language, privacy, and budget settings. Prefer genuinely free tiers when available, show quotas/credit use and any likely charge before a paid run, and never promise unlimited/free generation. Support provider fallback only when the fallback is compatible and the user has permitted it.
+8. **Durable execution** — all long-running work is recorded in RJ's queue, with idempotency keys, progress stages, retry/backoff, cancellation, and visible error states.
+9. **YouTube connection** — OAuth authorization uses the user's own Google account. Refresh tokens remain server-side and encrypted; publishing follows the user's configured privacy/scheduling policy. The user reviews title, description, visibility, thumbnail, and schedule and confirms before upload/publish.
+10. **Audit and security** — RLS for user-owned records, server-only secrets, validated tool inputs, rate limits, action audit records, least-privilege OAuth scopes, integration disconnect/revoke support, and no reuse of NOOR credentials or database.
 
 ## Delivery sequence
 
@@ -37,31 +40,39 @@ The separate RJ Supabase backend already contains RLS-protected profile, setting
 - Add a typed task/action contract and a confirmation UI for side effects.
 - Add tests for language routing, malformed model output, authorization, and provider failure.
 
-### Phase 2 — Agent task execution
-- Add a typed tool registry with per-tool permission scopes.
+### Phase 2 — Agent task execution and Tool Hub
+- Add a typed, capability-based tool registry with per-tool permission scopes and validated integration manifests.
+- Build the in-app Tool Hub: browse/search, connect, configure, test, view permissions/status, pause, and disconnect.
+- Add OAuth and secure API-key connection flows; never request or store provider passwords in chat.
 - Connect safe app tasks (create/list/update reminders and video projects) to real app/backend actions.
 - Add job progress, cancellation, retry, and audit history.
-- Require confirmation for external or destructive actions.
+- Require confirmation for external, paid, or destructive actions.
 
-### Phase 3 — YouTube and creator pipeline
-- Implement Google OAuth and secure token storage.
-- Implement the media pipeline as resumable queue stages.
-- Add upload privacy selection, scheduling, and final pre-publish confirmation.
-- Add integration tests with mocked provider and YouTube responses.
+### Phase 3 — In-app creator studio and Google video integration
+- Implement provider adapters for image, video, speech, subtitles, and rendering; evaluate supported Google video APIs and Flow integration honestly.
+- Build the complete resumable creator pipeline and in-app project/preview/editor experience.
+- Ensure prompt-to-video creation can complete within the RJ APK without redirecting to a separate creative website.
+- Implement Google OAuth and secure token storage for supported Google services.
+- Implement YouTube upload privacy selection, scheduling, and final pre-publish confirmation.
+- Add integration tests with mocked provider and YouTube responses, plus tests for quota exhaustion, provider fallback, cancellation, and interrupted rendering.
 
 ### Phase 4 — Branding, Android QA, and release readiness
 - Apply the exact approved Dragon + Crown RJ logo unchanged to app icon and launch screen.
 - Keep the existing dark UI and approved RJ identity; do not add prohibited logo wording.
 - Run Expo dependency checks, Expo Doctor, TypeScript, Edge Function checks, Android export, and APK build.
-- Test sign-in, chat, task confirmations, queue recovery, language handling, and Android install/launch.
+- Test sign-in, chat, tool connection/disconnection, permissions, paid-credit confirmation, video job recovery, preview, upload confirmation, language handling, and Android install/launch.
 
 ## Acceptance criteria
 
 - RJ responds naturally in Tamil, Tanglish, and English.
 - Chat is connected to a real backend AI gateway; no echo-only placeholder remains.
-- The assistant cannot silently execute external/destructive actions.
+- The assistant can discover and use connected tools through a permission-controlled registry, and the user can connect/disconnect integrations from inside RJ.
+- Tool integrations are modular: adding a new supported API/MCP provider does not require rebuilding the entire agent architecture.
+- Google video generation is accessible from RJ's in-app workflow; RJ does not force the user to open Google Flow or another external editor to finish a video. The implementation must not misrepresent an official Flow API if none is available.
+- A user can enter a prompt in RJ, receive a generated video inside RJ, preview it, and approve upload from the same APK.
 - Long-running jobs survive app restarts and can be resumed or cancelled.
-- YouTube publishing uses the user's own OAuth connection and the configured privacy policy.
+- YouTube publishing uses the user's own OAuth connection and the configured privacy policy, with explicit confirmation before upload/publish.
+- Provider costs, credit consumption, and free-tier limits are shown accurately; paid actions require consent.
 - No provider keys, OAuth secrets, refresh tokens, or service-role credentials are bundled in the app or committed to Git.
 - All work stays in the RJ repository and RJ Supabase project. NOOR remains untouched.
 - The final approved logo is used as-is, with no added text or redesign.
