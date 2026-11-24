@@ -116,6 +116,7 @@ export default function App() {
   const [openRouterKeyInput, setOpenRouterKeyInput] = useState("");
   const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
   const [providerBusy, setProviderBusy] = useState<string | null>(null);
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -508,7 +509,7 @@ export default function App() {
         ))}
       </View>
       <ActionButton title="Queue story generation" onPress={createJob} />
-      <Text style={styles.note}>Story generation runs through RJ’s background queue when a Gemini or Groq key is configured. Voice-over, visuals, subtitles, rendering and YouTube publishing are still separate stages.</Text>
+      <Text style={styles.note}>Story generation runs through RJ’s background queue when a Gemini or OpenRouter key is configured. Voice-over, visuals, subtitles, rendering and YouTube publishing are still separate stages.</Text>
       <View style={styles.divider} />
       <Text style={styles.sectionTitle}>Your video projects</Text>
       {jobs.length === 0 ? <Text style={styles.muted}>No projects yet. Add your first topic above.</Text> : jobs.map(job => (
@@ -516,7 +517,16 @@ export default function App() {
           <Text style={styles.jobTitle}>{job.topic}</Text>
           <Text style={styles.muted}>{job.language} • {job.createdAt}</Text>
           <Text style={styles.jobStatus}>{job.status}</Text>
-          {job.story ? <Text style={styles.muted}>{job.story.slice(0, 420)}{job.story.length > 420 ? "…" : ""}</Text> : null}
+          {job.story ? (
+            <>
+              <Text style={styles.muted}>{expandedJobId === job.id ? job.story : job.story.slice(0, 420) + (job.story.length > 420 ? "…" : "")}</Text>
+              {job.story.length > 420 ? (
+                <Pressable onPress={() => setExpandedJobId(current => current === job.id ? null : job.id)}>
+                  <Text style={{ color: RED, marginTop: 8 }}>{expandedJobId === job.id ? "Collapse story" : "Read full story"}</Text>
+                </Pressable>
+              ) : null}
+            </>
+          ) : null}
         </View>
       ))}
     </View>
