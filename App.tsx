@@ -124,35 +124,41 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!dataLoaded || !session || !supabase) return;
+    if (!authReady || !dataLoaded) return;
+    if (!session || !supabase) {
+      setJobs([]);
+      return;
+    }
     let active = true;
-    supabase.from("jobs")
-      .select("id,input,status,created_at")
-      .eq("user_id", session.user.id)
-      .eq("job_type", "video_generation")
-      .order("created_at", { ascending: false })
-      .then(({ data, error }) => {
-        if (!active || error || !data) return;
-        const remoteJobs: Job[] = data.map((row: any) => ({
-          id: row.id,
-          topic: String(row.input?.topic ?? "Untitled project"),
-          language: String(row.input?.language ?? "Tamil"),
-          createdAt: new Date(row.created_at).toLocaleString(),
-          status: row.status === "completed" ? "Completed" : "Saved — generation not connected"
-        }));
-        setJobs(current => {
-          const merged = [...remoteJobs, ...current.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
-          return merged;
-        });
-      });
+    const userJobsKey = "rj_video_jobs_" + session.user.id;
+    (async () => {
+      const saved = await AsyncStorage.getItem(userJobsKey);
+      const localJobs = saved ? JSON.parse(saved) as Job[] : [];
+      if (active) setJobs(localJobs);
+      const { data, error } = await supabase.from("jobs")
+        .select("id,input,status,created_at")
+        .eq("user_id", session.user.id)
+        .eq("job_type", "video_generation")
+        .order("created_at", { ascending: false });
+      if (!active || error || !data) return;
+      const remoteJobs: Job[] = data.map((row: any) => ({
+        id: row.id,
+        topic: String(row.input?.topic ?? "Untitled project"),
+        language: String(row.input?.language ?? "Tamil"),
+        createdAt: new Date(row.created_at).toLocaleString(),
+        status: row.status === "completed" ? "Completed" : "Saved — generation not connected"
+      }));
+      const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
+      if (active) setJobs(merged);
+    })().catch(() => {
+      if (active) Alert.alert("Cloud sync issue", "RJ could not load your saved projects. Your phone data remains safe.");
+    });
     return () => { active = false; };
-  }, [session, dataLoaded]);
+  }, [session, dataLoaded, authReady]);
 
   useEffect(() => {
     (async () => {
-      const savedJobs = await AsyncStorage.getItem("rj_video_jobs");
       const savedReminders = await AsyncStorage.getItem("rj_reminders");
-      if (savedJobs) setJobs(JSON.parse(savedJobs) as Job[]);
       if (savedReminders) setReminders(JSON.parse(savedReminders) as Reminder[]);
       const savedPin = await SecureStore.getItemAsync("rj_local_pin");
       const savedBio = await SecureStore.getItemAsync("rj_biometric_enabled");
@@ -172,12 +178,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!dataLoaded) return;
-    AsyncStorage.multiSet([
-      ["rj_video_jobs", JSON.stringify(jobs)],
-      ["rj_reminders", JSON.stringify(reminders)]
-    ]).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
-  }, [jobs, reminders, dataLoaded]);
+    if (!dataLoaded || !authReady) return;
+    const writes: [string, string][] = [["rj_reminders", JSON.stringify(reminders)]];
+    if (session) writes.push(["rj_video_jobs_" + session.user.id, JSON.stringify(jobs)]);
+    AsyncStorage.multiSet(writes).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
+  }, [jobs, reminders, dataLoaded, authReady, session]);
 
   const createJob = async () => {
     const clean = topic.trim();
