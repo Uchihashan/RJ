@@ -246,6 +246,18 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
+    if (Platform.OS === "web") {
+      // Browser demo: device PIN and biometrics are native-only features.
+      setPinConfigured(false);
+      setPasswordConfigured(false);
+      setLocked(false);
+      setBiometricAvailable(false);
+      setBiometricEnabled(false);
+      AsyncStorage.getItem("rj_reminders").then(saved => {
+        if (saved) setReminders(JSON.parse(saved) as Reminder[]);
+      }).catch(() => undefined).finally(() => setDataLoaded(true));
+      return;
+    }
     (async () => {
       const savedReminders = await AsyncStorage.getItem("rj_reminders");
       if (savedReminders) setReminders(JSON.parse(savedReminders) as Reminder[]);
