@@ -186,7 +186,7 @@ export default function App() {
         story: typeof row.output?.story === "string" ? row.output.story : undefined,
         description: typeof row.input?.description === "string" ? row.input.description : undefined,
         aspectRatio: typeof row.input?.aspect_ratio === "string" ? row.input.aspect_ratio : undefined,
-        captionsEnabled: typeof row.input?.captions_enabled === "boolean" ? row.input.captions_enabled : undefined,\n        description: typeof row.input?.description === "string" ? row.input.description : undefined,\n        aspectRatio: typeof row.input?.aspect_ratio === "string" ? row.input.aspect_ratio : undefined,\n        captionsEnabled: typeof row.input?.captions_enabled === "boolean" ? row.input.captions_enabled : undefined
+        captionsEnabled: typeof row.input?.captions_enabled === "boolean" ? row.input.captions_enabled : undefined
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
       if (active) {
@@ -233,7 +233,10 @@ export default function App() {
         language: String(row.input?.language ?? "Tamil"),
         createdAt: new Date(row.created_at).toLocaleString(),
         status: jobStatusLabel(row),
-        story: typeof row.output?.story === "string" ? row.output.story : undefined
+        story: typeof row.output?.story === "string" ? row.output.story : undefined,
+        description: typeof row.input?.description === "string" ? row.input.description : undefined,
+        aspectRatio: typeof row.input?.aspect_ratio === "string" ? row.input.aspect_ratio : undefined,
+        captionsEnabled: typeof row.input?.captions_enabled === "boolean" ? row.input.captions_enabled : undefined
       }));
       setJobs(remoteJobs);
       setJobsOwnerId(session.user.id);
