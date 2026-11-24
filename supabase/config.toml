@@ -2,3 +2,6 @@ project_id = "vxtklbtenozsluhseigp"
 
 [functions.rj-worker]
 verify_jwt = false
+
+[functions.rj-assistant]
+verify_jwt = true
