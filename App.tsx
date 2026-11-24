@@ -124,7 +124,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!session || !supabase) return;
+    if (!dataLoaded || !session || !supabase) return;
     let active = true;
     supabase.from("jobs")
       .select("id,input,status,created_at")
@@ -146,7 +146,7 @@ export default function App() {
         });
       });
     return () => { active = false; };
-  }, [session]);
+  }, [session, dataLoaded]);
 
   useEffect(() => {
     (async () => {
