@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -69,6 +70,7 @@ export default function App() {
   const [topic, setTopic] = useState("");
   const [language, setLanguage] = useState("Tamil");
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [dataLoaded, setDataLoaded] = useState(false);
   const [chat, setChat] = useState("");
   const [chatReply, setChatReply] = useState("வணக்கம்! இன்று என்ன வேலை செய்யலாம்? / Vanakkam! What shall we work on today?");
   const [scheduleTitle, setScheduleTitle] = useState("");
@@ -86,6 +88,11 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      const savedJobs = await AsyncStorage.getItem("rj_video_jobs");
+      const savedReminders = await AsyncStorage.getItem("rj_reminders");
+      if (savedJobs) setJobs(JSON.parse(savedJobs) as Job[]);
+      if (savedReminders) setReminders(JSON.parse(savedReminders) as string[]);
+      setDataLoaded(true);
       const savedPin = await SecureStore.getItemAsync("rj_local_pin");
       const savedBio = await SecureStore.getItemAsync("rj_biometric_enabled");
       const savedPassword = await SecureStore.getItemAsync("rj_local_password");
@@ -98,6 +105,14 @@ export default function App() {
       setBiometricAvailable(hardware && enrolled);
     })();
   }, []);
+
+  useEffect(() => {
+    if (!dataLoaded) return;
+    AsyncStorage.multiSet([
+      ["rj_video_jobs", JSON.stringify(jobs)],
+      ["rj_reminders", JSON.stringify(reminders)]
+    ]).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
+  }, [jobs, reminders, dataLoaded]);
 
   const createJob = () => {
     const clean = topic.trim();
