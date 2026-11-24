@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import { AppState } from "react-native";
+import { supabase } from "./src/lib/supabase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Alert,
@@ -91,6 +93,12 @@ export default function App() {
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [locked, setLocked] = useState(false);
   const [unlockPin, setUnlockPin] = useState("");
+  const [session, setSession] = useState<any>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signup");
+  const [authBusy, setAuthBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -123,7 +131,7 @@ export default function App() {
     ]).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
   }, [jobs, reminders, dataLoaded]);
 
-  const createJob = () => {
+  const createJob = async () => {
     const clean = topic.trim();
     if (!clean) {
       Alert.alert("Topic needed", "Enter a video heading or story topic first.");
@@ -134,12 +142,61 @@ export default function App() {
       topic: clean,
       language,
       createdAt: new Date().toLocaleString(),
-      status: "Saved — AI connection required"
+      status: "Saved — generation not connected"
     };
+    if (session && supabase) {
+      const { data, error } = await supabase.from("jobs").insert({
+        user_id: session.user.id,
+        job_type: "video_generation",
+        status: "paused",
+        input: { topic: clean, language, stage: "idea_saved" }
+      }).select("id").single();
+      if (data?.id) item.id = data.id;
+      if (error) Alert.alert("Cloud save issue", "The idea is saved on this phone, but cloud sync failed. Please check your connection.");
+    }
     setJobs(current => [item, ...current]);
     setTopic("");
     Alert.alert("Saved to RJ", "Your video idea is saved. Connect an AI video service to generate the full video.");
     setTab("Create");
+  };
+
+  const submitAuth = async () => {
+    if (!supabase) {
+      Alert.alert("Connection unavailable", "RJ cloud connection is not configured in this build.");
+      return;
+    }
+    const email = authEmail.trim().toLowerCase();
+    if (!email || !authPassword) {
+      Alert.alert("Details needed", "Enter your email and password.");
+      return;
+    }
+    if (authMode === "signup" && authPassword.length < 8) {
+      Alert.alert("Password too short", "Use at least 8 characters.");
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      const result = authMode === "signup"
+        ? await supabase.auth.signUp({ email, password: authPassword })
+        : await supabase.auth.signInWithPassword({ email, password: authPassword });
+      if (result.error) throw result.error;
+      if (authMode === "signup" && !result.data.session) {
+        Alert.alert("Check your email", "Supabase requires email confirmation before the first sign-in. Open the confirmation email, then sign in.");
+        setAuthMode("signin");
+      } else {
+        setAuthPassword("");
+      }
+    } catch (error: any) {
+      Alert.alert("Account issue", error?.message ?? "Could not complete account sign-in.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) Alert.alert("Sign-out issue", error.message);
   };
 
   const sendChat = () => {
@@ -340,6 +397,11 @@ export default function App() {
         {pinConfigured && <ActionButton title="Lock RJ now" onPress={() => setLocked(true)} secondary />}
       </View>
       <View style={styles.panel}>
+        <Text style={styles.sectionTitle}>RJ account</Text>
+        <Text style={styles.muted}>Signed in as {session?.user?.email ?? "Unknown account"}</Text>
+        <ActionButton title="Sign out of RJ" onPress={signOut} secondary />
+      </View>
+      <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Connections</Text>
         <Text style={styles.listLine}>AI video provider: <Text style={styles.pending}>Not connected</Text></Text>
         <Text style={styles.listLine}>YouTube account: <Text style={styles.pending}>Not connected</Text></Text>
@@ -354,8 +416,24 @@ export default function App() {
     </>
   );
 
-  if (!dataLoaded) {
+  if (!dataLoaded || !authReady) {
     return <View style={[styles.screen, styles.lockScreen]}><StatusBar style="light" /><Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text><Text style={styles.muted}>Loading your secure workspace…</Text></View>;
+  }
+
+  if (!session) {
+    return (
+      <View style={[styles.screen, styles.lockScreen]}>
+        <StatusBar style="light" />
+        <Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text>
+        <Text style={styles.heroSub}>Your private RJ account</Text>
+        <Text style={styles.muted}>Sign in to sync your saved projects securely across your devices.</Text>
+        <Field label="Email address" value={authEmail} onChangeText={setAuthEmail} placeholder="you@example.com" />
+        <Field label="Password (minimum 8 characters)" value={authPassword} onChangeText={setAuthPassword} placeholder="Enter password" secureTextEntry />
+        <ActionButton title={authBusy ? "Please wait…" : authMode === "signup" ? "Create RJ account" : "Sign in"} onPress={submitAuth} disabled={authBusy} />
+        <ActionButton title={authMode === "signup" ? "Already have an account? Sign in" : "New to RJ? Create account"} onPress={() => setAuthMode(authMode === "signup" ? "signin" : "signup")} secondary disabled={authBusy} />
+        <Text style={styles.note}>Your PIN, password and fingerprint lock remain local to this phone. Account password is handled by Supabase Auth.</Text>
+      </View>
+    );
   }
 
   if (locked) {
