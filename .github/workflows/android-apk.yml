@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build installable Android debug APK
+    name: Build installable Android APK with JS bundle
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -61,14 +61,21 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --non-interactive
 
-      - name: Build debug APK
+      # assembleRelease invokes the Expo/React Native Gradle bundle task,
+      # packaging index.android.bundle into the APK for standalone launch.
+      - name: Build release APK with embedded JavaScript bundle
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Verify APK and embedded JavaScript bundle
+        run: |
+          test -s android/app/build/outputs/apk/release/app-release.apk
+          test -s android/app/build/generated/assets/createBundleReleaseJsAndAssets/index.android.bundle
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-android-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: RJ-android-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
