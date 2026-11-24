@@ -240,7 +240,8 @@ async function processJob(message: QueueMessage) {
     return { job_id: jobId, outcome: "story_ready", provider: provider.name };
   }
 
-  const retryable = failures.every((failure) => failure.retryable);
+  // Retry if at least one configured provider failed transiently; a different provider may have a bad key.
+  const retryable = failures.some((failure) => failure.retryable);
   const delaySeconds = failures.some((failure) => failure.quota) ? 1800 : 300;
   if (retryable) {
     const runAfter = new Date(Date.now() + delaySeconds * 1000).toISOString();
