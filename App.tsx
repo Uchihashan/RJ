@@ -76,6 +76,9 @@ export default function App() {
   const [reminders, setReminders] = useState<string[]>([]);
   const [pin, setPin] = useState("");
   const [pinConfigured, setPinConfigured] = useState(false);
+  const [password, setPassword] = useState("");
+  const [passwordConfigured, setPasswordConfigured] = useState(false);
+  const [unlockPassword, setUnlockPassword] = useState("");
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -85,7 +88,10 @@ export default function App() {
     (async () => {
       const savedPin = await SecureStore.getItemAsync("rj_local_pin");
       const savedBio = await SecureStore.getItemAsync("rj_biometric_enabled");
+      const savedPassword = await SecureStore.getItemAsync("rj_local_password");
       setPinConfigured(!!savedPin);
+      setPasswordConfigured(!!savedPassword);
+      setLocked(!!savedPin || !!savedPassword);
       setBiometricEnabled(savedBio === "true");
       const hardware = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
@@ -139,6 +145,28 @@ export default function App() {
     setPin("");
     setPinConfigured(true);
     Alert.alert("PIN saved", "Your PIN is stored securely on this device.");
+  };
+
+  const savePassword = async () => {
+    const clean = password.trim();
+    if (clean.length < 8) {
+      Alert.alert("Password too short", "Use at least 8 characters.");
+      return;
+    }
+    await SecureStore.setItemAsync("rj_local_password", clean);
+    setPassword("");
+    setPasswordConfigured(true);
+    Alert.alert("Password saved", "Your password is stored securely on this device.");
+  };
+
+  const unlockWithPassword = async () => {
+    const savedPassword = await SecureStore.getItemAsync("rj_local_password");
+    if (savedPassword && unlockPassword === savedPassword) {
+      setLocked(false);
+      setUnlockPassword("");
+    } else {
+      Alert.alert("Incorrect password", "Please try again.");
+    }
   };
 
   const toggleBiometric = async () => {
@@ -250,6 +278,9 @@ export default function App() {
         <Field label="New PIN (4–8 digits)" value={pin} onChangeText={setPin} placeholder="Enter PIN" secureTextEntry />
         <ActionButton title={pinConfigured ? "Update PIN" : "Save PIN"} onPress={savePin} />
         <Text style={styles.listLine}>PIN status: {pinConfigured ? "Configured" : "Not configured"}</Text>
+        <Field label="New password (minimum 8 characters)" value={password} onChangeText={setPassword} placeholder="Create a password" secureTextEntry />
+        <ActionButton title={passwordConfigured ? "Update password" : "Save password"} onPress={savePassword} secondary />
+        <Text style={styles.listLine}>Password status: {passwordConfigured ? "Configured" : "Not configured"}</Text>
         <View style={styles.divider} />
         <Text style={styles.sectionTitle}>Fingerprint / biometrics</Text>
         <Text style={styles.muted}>{biometricAvailable ? "Your device supports biometric authentication." : "Fingerprint or face unlock is not set up on this device."}</Text>
@@ -280,6 +311,8 @@ export default function App() {
         <Text style={styles.heroSub}>App locked</Text>
         <Field label="Enter PIN" value={unlockPin} onChangeText={setUnlockPin} placeholder="PIN" secureTextEntry />
         <ActionButton title="Unlock with PIN" onPress={unlockWithPin} />
+        <Field label="Or enter password" value={unlockPassword} onChangeText={setUnlockPassword} placeholder="Password" secureTextEntry />
+        <ActionButton title="Unlock with password" onPress={unlockWithPassword} secondary />
         {biometricEnabled && <ActionButton title="Unlock with fingerprint" onPress={unlockWithBiometric} secondary />}
       </View>
     );
