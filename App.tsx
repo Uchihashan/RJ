@@ -78,6 +78,7 @@ export default function App() {
   const [topic, setTopic] = useState("");
   const [language, setLanguage] = useState("Tamil");
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobsOwnerId, setJobsOwnerId] = useState<string | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [chat, setChat] = useState("");
   const [chatReply, setChatReply] = useState("வணக்கம்! இன்று என்ன வேலை செய்யலாம்? / Vanakkam! What shall we work on today?");
@@ -127,20 +128,30 @@ export default function App() {
     if (!authReady || !dataLoaded) return;
     if (!session || !supabase) {
       setJobs([]);
+      setJobsOwnerId(null);
       return;
     }
     let active = true;
+    setJobs([]);
+    setJobsOwnerId(null);
     const userJobsKey = "rj_video_jobs_" + session.user.id;
+    let localJobsFallback: Job[] = [];
     (async () => {
       const saved = await AsyncStorage.getItem(userJobsKey);
       const localJobs = saved ? JSON.parse(saved) as Job[] : [];
+      localJobsFallback = localJobs;
       if (active) setJobs(localJobs);
       const { data, error } = await supabase.from("jobs")
         .select("id,input,status,created_at")
         .eq("user_id", session.user.id)
         .eq("job_type", "video_generation")
         .order("created_at", { ascending: false });
-      if (!active || error || !data) return;
+      if (!active) return;
+      if (error || !data) {
+        setJobs(localJobs);
+        setJobsOwnerId(session.user.id);
+        return;
+      }
       const remoteJobs: Job[] = data.map((row: any) => ({
         id: row.id,
         topic: String(row.input?.topic ?? "Untitled project"),
@@ -149,9 +160,16 @@ export default function App() {
         status: row.status === "completed" ? "Completed" : "Saved — generation not connected"
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
-      if (active) setJobs(merged);
+      if (active) {
+        setJobs(merged);
+        setJobsOwnerId(session.user.id);
+      }
     })().catch(() => {
-      if (active) Alert.alert("Cloud sync issue", "RJ could not load your saved projects. Your phone data remains safe.");
+      if (active) {
+        setJobs(localJobsFallback);
+        setJobsOwnerId(session.user.id);
+        Alert.alert("Cloud sync issue", "RJ could not load your saved projects. Your phone data remains safe.");
+      }
     });
     return () => { active = false; };
   }, [session, dataLoaded, authReady]);
@@ -180,14 +198,18 @@ export default function App() {
   useEffect(() => {
     if (!dataLoaded || !authReady) return;
     const writes: [string, string][] = [["rj_reminders", JSON.stringify(reminders)]];
-    if (session) writes.push(["rj_video_jobs_" + session.user.id, JSON.stringify(jobs)]);
+    if (session && jobsOwnerId === session.user.id) writes.push(["rj_video_jobs_" + session.user.id, JSON.stringify(jobs)]);
     AsyncStorage.multiSet(writes).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
-  }, [jobs, reminders, dataLoaded, authReady, session]);
+  }, [jobs, reminders, dataLoaded, authReady, session, jobsOwnerId]);
 
   const createJob = async () => {
     const clean = topic.trim();
     if (!clean) {
       Alert.alert("Topic needed", "Enter a video heading or story topic first.");
+      return;
+    }
+    if (session && jobsOwnerId !== session.user.id) {
+      Alert.alert("Projects loading", "Wait a moment for your account projects to finish syncing, then try again.");
       return;
     }
     const item: Job = {
