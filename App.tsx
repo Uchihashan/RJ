@@ -352,7 +352,7 @@ export default function App() {
     if (!supabase) return;
     const email = authEmail.trim().toLowerCase();
     const token = authOtp.trim();
-    if (!email || !/^\\d{6}$/.test(token)) {
+    if (!email || !/^\d{6}$/.test(token)) {
       Alert.alert("Code needed", "Enter the 6-digit code sent to your email.");
       return;
     }
