@@ -423,11 +423,21 @@ export default function App() {
     if (error) Alert.alert("Sign-out issue", error.message);
   };
 
-  const sendChat = () => {
-    const message = chat.trim();
-    if (!message) return;
-    setChatReply("I received: “" + message + "”. The assistant workflow and AI provider still need to be connected in the next build stage.");
-    setChat("");
+  const saveProjectEdits = async (id: string, nextTopic: string, nextStory: string) => {
+    const existing = jobs.find(job => job.id === id);
+    setJobs(current => current.map(job => job.id === id
+      ? { ...job, topic: nextTopic, story: nextStory, status: "Edits saved — ready for rendering" }
+      : job));
+    if (session && supabase && existing && /^[0-9a-f-]{36}$/i.test(id)) {
+      const { error } = await supabase.rpc("rj_update_video_project", {
+        p_job_id: id,
+        p_topic: nextTopic,
+        p_story: nextStory,
+      });
+      if (error) {
+        Alert.alert("Cloud save issue", "Your edits are saved on this phone, but cloud sync failed: " + error.message);
+      }
+    }
   };
 
   const addReminder = async () => {
@@ -720,7 +730,7 @@ export default function App() {
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
         {tab === "Home" && renderHome()}
         {tab === "Create" && renderCreate()}
-        {tab === "Edit" && <VideoEditorScreen projects={jobs} onSave={(id, nextTopic, nextStory) => setJobs(current => current.map(job => job.id === id ? { ...job, topic: nextTopic, story: nextStory, status: "Edits saved — ready for rendering" } : job))} />}
+        {tab === "Edit" && <VideoEditorScreen projects={jobs} onSave={saveProjectEdits} />}
         {tab === "Tools" && <ToolHubScreen geminiConnected={!!providerStatus.gemini} openRouterConnected={!!providerStatus.openrouter} onOpenSettings={() => setTab("Settings")} />}
         {tab === "Schedule" && renderSchedule()}
         {tab === "Settings" && renderSettings()}
