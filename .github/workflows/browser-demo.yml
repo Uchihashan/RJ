@@ -1,0 +1,35 @@
+name: RJ Browser Demo Build
+
+on:
+  push:
+    branches:
+      - feature/rj-full-integration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-web-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate Expo configuration
+        run: npx expo config --type public
+      - name: Export browser demo
+        run: npx expo export --platform web
+      - name: Upload private workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rj-browser-demo
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3
