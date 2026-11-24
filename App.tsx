@@ -112,6 +112,10 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signup");
   const [authBusy, setAuthBusy] = useState(false);
+  const [geminiKeyInput, setGeminiKeyInput] = useState("");
+  const [openRouterKeyInput, setOpenRouterKeyInput] = useState("");
+  const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
+  const [providerBusy, setProviderBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -186,6 +190,18 @@ export default function App() {
     });
     return () => { active = false; };
   }, [session, dataLoaded, authReady]);
+
+  useEffect(() => {
+    if (!session || !supabase) return;
+    let active = true;
+    supabase.rpc("rj_provider_status").then(({ data, error }) => {
+      if (!active || error || !data) return;
+      const next: Record<string, boolean> = {};
+      for (const item of data as { provider: string; configured: boolean }[]) next[item.provider] = item.configured;
+      setProviderStatus(next);
+    });
+    return () => { active = false; };
+  }, [session]);
 
   useEffect(() => {
     if (!session || !supabase) return;
@@ -306,6 +322,31 @@ export default function App() {
       Alert.alert("Account issue", error?.message ?? "Could not complete account sign-in.");
     } finally {
       setAuthBusy(false);
+    }
+  };
+
+  const saveProviderKey = async (provider: "gemini" | "openrouter", value: string) => {
+    if (!supabase || !session) return;
+    const apiKey = value.trim();
+    if (apiKey.length < 20) {
+      Alert.alert("API key needed", "Paste the complete provider API key.");
+      return;
+    }
+    setProviderBusy(provider);
+    try {
+      const { error } = await supabase.rpc("rj_store_provider_key", {
+        p_provider: provider,
+        p_api_key: apiKey,
+      });
+      if (error) throw error;
+      setProviderStatus(current => ({ ...current, [provider]: true }));
+      if (provider === "gemini") setGeminiKeyInput("");
+      else setOpenRouterKeyInput("");
+      Alert.alert("Provider saved securely", "The key is encrypted in RJ's backend. Any jobs waiting for a provider will be resumed automatically.");
+    } catch (error: any) {
+      Alert.alert("Could not save provider", error?.message ?? "RJ could not securely store this API key.");
+    } finally {
+      setProviderBusy(null);
     }
   };
 
@@ -519,11 +560,21 @@ export default function App() {
         <ActionButton title="Sign out of RJ" onPress={signOut} secondary />
       </View>
       <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>Connections</Text>
-        <Text style={styles.listLine}>AI video provider: <Text style={styles.pending}>Not connected</Text></Text>
+        <Text style={styles.sectionTitle}>Free AI story providers</Text>
+        <Text style={styles.listLine}>Gemini: <Text style={providerStatus.gemini ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.gemini ? "Key stored securely" : "Not connected"}</Text></Text>
+        <Field label="Gemini API key" value={geminiKeyInput} onChangeText={setGeminiKeyInput} placeholder="Paste Gemini API key" secureTextEntry />
+        <ActionButton title={providerBusy === "gemini" ? "Saving…" : "Save Gemini key"} onPress={() => saveProviderKey("gemini", geminiKeyInput)} disabled={providerBusy !== null} />
+        <View style={styles.divider} />
+        <Text style={styles.listLine}>OpenRouter: <Text style={providerStatus.openrouter ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.openrouter ? "Key stored securely" : "Not connected"}</Text></Text>
+        <Field label="OpenRouter API key" value={openRouterKeyInput} onChangeText={setOpenRouterKeyInput} placeholder="Paste OpenRouter API key" secureTextEntry />
+        <ActionButton title={providerBusy === "openrouter" ? "Saving…" : "Save OpenRouter key"} onPress={() => saveProviderKey("openrouter", openRouterKeyInput)} disabled={providerBusy !== null} />
+        <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses Gemini first, then OpenRouter's free-model router. Free-tier quotas apply; paid models are not called automatically.</Text>
+      </View>
+      <View style={styles.panel}>
+        <Text style={styles.sectionTitle}>Other connections</Text>
         <Text style={styles.listLine}>YouTube account: <Text style={styles.pending}>Not connected</Text></Text>
-        <Text style={styles.listLine}>Cloud sync: <Text style={{ color: "#53C98B", fontWeight: "700" }}>Account and project sync connected</Text></Text>
-        <Text style={styles.note}>RJ account and project cloud sync are connected. AI video providers and YouTube OAuth are still pending. Never paste private API keys into public code.</Text>
+        <Text style={styles.listLine}>Cloud sync: <Text style={{ color: "#53C98B", fontWeight: "700" }}>Connected</Text></Text>
+        <Text style={styles.note}>YouTube OAuth, voice-over, visuals, subtitles and rendering are the next pipeline stages.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>About RJ</Text>
