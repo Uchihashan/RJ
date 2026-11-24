@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { AppState } from "react-native";
+import { AppState, Linking } from "react-native";
 import { supabase } from "./src/lib/supabase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -562,10 +562,12 @@ export default function App() {
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Free AI story providers</Text>
         <Text style={styles.listLine}>Gemini: <Text style={providerStatus.gemini ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.gemini ? "Key stored securely" : "Not connected"}</Text></Text>
+        <Pressable onPress={() => Linking.openURL("https://aistudio.google.com/apikey")}><Text style={{ color: RED, marginBottom: 10 }}>Get a free Gemini API key ↗</Text></Pressable>
         <Field label="Gemini API key" value={geminiKeyInput} onChangeText={setGeminiKeyInput} placeholder="Paste Gemini API key" secureTextEntry />
         <ActionButton title={providerBusy === "gemini" ? "Saving…" : "Save Gemini key"} onPress={() => saveProviderKey("gemini", geminiKeyInput)} disabled={providerBusy !== null} />
         <View style={styles.divider} />
         <Text style={styles.listLine}>OpenRouter: <Text style={providerStatus.openrouter ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.openrouter ? "Key stored securely" : "Not connected"}</Text></Text>
+        <Pressable onPress={() => Linking.openURL("https://openrouter.ai/settings/keys")}><Text style={{ color: RED, marginBottom: 10 }}>Get an OpenRouter API key ↗</Text></Pressable>
         <Field label="OpenRouter API key" value={openRouterKeyInput} onChangeText={setOpenRouterKeyInput} placeholder="Paste OpenRouter API key" secureTextEntry />
         <ActionButton title={providerBusy === "openrouter" ? "Saving…" : "Save OpenRouter key"} onPress={() => saveProviderKey("openrouter", openRouterKeyInput)} disabled={providerBusy !== null} />
         <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses Gemini first, then OpenRouter's free-model router. Free-tier quotas apply; paid models are not called automatically.</Text>
