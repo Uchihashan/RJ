@@ -40,7 +40,11 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android 37 platform
-        run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+        run: |
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
 
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
