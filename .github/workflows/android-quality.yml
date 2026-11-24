@@ -42,6 +42,14 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.1.4
+
+      - name: Type-check Supabase Edge Function
+        run: deno check supabase/functions/rj-worker/index.ts
+
       - name: Export Android bundle
         run: npx expo export --platform android --output-dir dist
 
