@@ -115,6 +115,8 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signup");
   const [authBusy, setAuthBusy] = useState(false);
+  const [otpPending, setOtpPending] = useState(false);
+  const [authOtp, setAuthOtp] = useState("");
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [openRouterKeyInput, setOpenRouterKeyInput] = useState("");
   const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
@@ -314,18 +316,74 @@ export default function App() {
     }
     setAuthBusy(true);
     try {
-      const result = authMode === "signup"
-        ? await supabase.auth.signUp({ email, password: authPassword })
-        : await supabase.auth.signInWithPassword({ email, password: authPassword });
-      if (result.error) throw result.error;
-      if (authMode === "signup" && !result.data.session) {
-        Alert.alert("Check your email", "Supabase requires email confirmation before the first sign-in. Open the confirmation email, then sign in.");
-        setAuthMode("signin");
+      if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({ email, password: authPassword });
+        if (error) throw error;
+        if (data.session) {
+          setAuthPassword("");
+          setOtpPending(false);
+        } else {
+          setOtpPending(true);
+          setAuthOtp("");
+          Alert.alert("Verification code sent", "Enter the 6-digit code sent to your email.");
+        }
       } else {
-        setAuthPassword("");
+        const { error } = await supabase.auth.signInWithPassword({ email, password: authPassword });
+        if (error) {
+          if (error.message.toLowerCase().includes("email not confirmed")) {
+            setOtpPending(true);
+            Alert.alert("Email verification needed", "Send a new 6-digit code to your email, then enter it here.");
+          } else {
+            throw error;
+          }
+        } else {
+          setAuthPassword("");
+          setOtpPending(false);
+        }
       }
     } catch (error: any) {
       Alert.alert("Account issue", error?.message ?? "Could not complete account sign-in.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const verifyAuthOtp = async () => {
+    if (!supabase) return;
+    const email = authEmail.trim().toLowerCase();
+    const token = authOtp.trim();
+    if (!email || !/^\\d{6}$/.test(token)) {
+      Alert.alert("Code needed", "Enter the 6-digit code sent to your email.");
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+      if (error) throw error;
+      setAuthOtp("");
+      setAuthPassword("");
+      setOtpPending(false);
+    } catch (error: any) {
+      Alert.alert("Verification failed", error?.message ?? "That code could not be verified. Request a new code and try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const resendAuthOtp = async () => {
+    if (!supabase) return;
+    const email = authEmail.trim().toLowerCase();
+    if (!email) {
+      Alert.alert("Email needed", "Enter your email address first.");
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.resend({ type: "signup", email });
+      if (error) throw error;
+      Alert.alert("New code sent", "Check your inbox and spam folder for the 6-digit RJ verification code.");
+    } catch (error: any) {
+      Alert.alert("Could not resend code", error?.message ?? "Please wait a moment and try again.");
     } finally {
       setAuthBusy(false);
     }
@@ -603,6 +661,22 @@ export default function App() {
 
   if (!dataLoaded || !authReady) {
     return <View style={[styles.screen, styles.lockScreen]}><StatusBar style="light" /><Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text><Text style={styles.muted}>Loading your secure workspace…</Text></View>;
+  }
+
+  if (!session && otpPending) {
+    return (
+      <View style={[styles.screen, styles.lockScreen]}>
+        <StatusBar style="light" />
+        <Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text>
+        <Text style={styles.heroSub}>Verify your email</Text>
+        <Text style={styles.muted}>Enter the 6-digit code sent to {authEmail.trim().toLowerCase()}.</Text>
+        <Field label="6-digit verification code" value={authOtp} onChangeText={setAuthOtp} placeholder="123456" />
+        <ActionButton title={authBusy ? "Please wait…" : "Verify code"} onPress={verifyAuthOtp} disabled={authBusy} />
+        <ActionButton title="Resend verification code" onPress={resendAuthOtp} secondary disabled={authBusy} />
+        <ActionButton title="Back to sign in" onPress={() => { setOtpPending(false); setAuthOtp(""); setAuthMode("signin"); }} secondary disabled={authBusy} />
+        <Text style={styles.note}>Use the latest code from your email. Never share this code with anyone.</Text>
+      </View>
+    );
   }
 
   if (!session) {
