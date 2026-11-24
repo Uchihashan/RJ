@@ -1,0 +1,310 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+// Prefer the modern secret key; omit Authorization because secret keys belong in apikey only.
+ // Fall back to the legacy JWT service-role key while Supabase's transition period remains active.
+const secretMapRaw = Deno.env.get("SUPABASE_SECRET_KEYS");
+const secretKey = secretMapRaw
+  ? (JSON.parse(secretMapRaw) as Record<string, string>)["default"]
+  : "";
+const legacyServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const ADMIN_KEY = secretKey || legacyServiceRoleKey;
+
+if (!SUPABASE_URL || !ADMIN_KEY) {
+  throw new Error("RJ worker is missing its server-side Supabase credentials");
+}
+
+const admin = createClient(SUPABASE_URL, ADMIN_KEY, {
+  global: { headers: secretKey ? { Authorization: "" } : {} },
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+type QueueMessage = {
+  msg_id: number | string;
+  message: { job_id?: string; user_id?: string };
+};
+
+type ProviderFailure = {
+  provider: string;
+  message: string;
+  status: number | null;
+  retryable: boolean;
+  quota: boolean;
+};
+
+function response(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+}
+
+function buildPrompt(topic: string, language: string) {
+  return `Create an original, age-appropriate children's story for a YouTube video.
+Topic: ${topic}
+Language: ${language}
+Requirements:
+- Write in natural ${language}; keep names and sentences easy for children.
+- Aim for a 4–6 minute narration.
+- Start with an engaging title and a short hook.
+- Divide the story into 6–8 clearly numbered scenes.
+- For every scene provide: visual description, narrator voice-over, and any short dialogue.
+- Finish with a gentle positive moral and a short closing line.
+- Keep it kind, safe, non-frightening, and suitable for children.
+- Do not use copyrighted characters, existing story plots, or song lyrics.
+Return only the complete story script as readable text.`;
+}
+
+async function callGemini(apiKey: string, prompt: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.8, maxOutputTokens: 5000 },
+        }),
+        signal: controller.signal,
+      },
+    );
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = body?.error?.message ?? "Gemini request failed";
+      throw Object.assign(new Error(String(detail)), { status: res.status });
+    }
+    const text = body?.candidates?.[0]?.content?.parts
+      ?.map((part: { text?: string }) => part.text ?? "")
+      .join("\n")
+      .trim();
+    if (!text) throw Object.assign(new Error("Gemini returned an empty story"), { status: 502 });
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callOpenRouterFree(apiKey: string, prompt: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + apiKey,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/Uchihashan/RJ",
+        "X-Title": "RJ",
+      },
+      body: JSON.stringify({
+        model: "openrouter/free",
+        messages: [
+          { role: "system", content: "You write original, safe, age-appropriate children's stories." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.8,
+        max_tokens: 5000,
+      }),
+      signal: controller.signal,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = body?.error?.message ?? "OpenRouter free-model request failed";
+      throw Object.assign(new Error(String(detail)), { status: res.status });
+    }
+    const text = body?.choices?.[0]?.message?.content?.trim();
+    if (!text) throw Object.assign(new Error("OpenRouter returned an empty story"), { status: 502 });
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function classifyFailure(provider: string, error: unknown): ProviderFailure {
+  const status = typeof error === "object" && error !== null && "status" in error
+    ? Number((error as { status: unknown }).status)
+    : null;
+  const message = error instanceof Error ? error.message : "Provider request failed";
+  const quota = status === 429 || /quota|resource exhausted|rate.?limit/i.test(message);
+  return {
+    provider,
+    message: message.slice(0, 500),
+    status,
+    retryable: quota || status === null || status >= 500,
+    quota,
+  };
+}
+
+async function processJob(message: QueueMessage) {
+  const payload = message.message ?? {};
+  const jobId = payload.job_id;
+  const userId = payload.user_id;
+
+  if (!jobId || !userId) {
+    await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+    return { outcome: "discarded_invalid_message" };
+  }
+
+  const { data: job, error: loadError } = await admin
+    .from("jobs")
+    .select("id,user_id,job_type,status,input,attempt_count")
+    .eq("id", jobId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (loadError) throw loadError;
+  if (!job || job.job_type !== "video_generation" || !["queued", "waiting_retry"].includes(job.status)) {
+    await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+    return { job_id: jobId, outcome: "discarded_stale_message" };
+  }
+
+  const { data: credentialRows, error: credentialError } = await admin.rpc("rj_get_provider_keys", { p_user_id: userId });
+  if (credentialError) throw credentialError;
+  const credentialMap = new Map<string, string>(
+    (credentialRows ?? []).map((row: { provider: string; api_key: string }) => [row.provider, row.api_key]),
+  );
+  const prompt = buildPrompt(String(job.input?.topic ?? ""), String(job.input?.language ?? "Tamil"));
+  const providers: { name: string; run: () => Promise<string> }[] = [];
+  const geminiKey = credentialMap.get("gemini");
+  const openRouterKey = credentialMap.get("openrouter");
+  if (geminiKey) providers.push({ name: "gemini_free_tier", run: () => callGemini(geminiKey, prompt) });
+  if (openRouterKey) providers.push({ name: "openrouter_free_router", run: () => callOpenRouterFree(openRouterKey, prompt) });
+
+  if (providers.length === 0) {
+    const { error: pauseError } = await admin.from("jobs").update({
+      status: "paused",
+      error_code: "provider_not_configured",
+      error_message: "Add a Gemini or OpenRouter API key in RJ Settings. Both are configured for free-tier story generation; limits still apply.",
+      updated_at: new Date().toISOString(),
+    }).eq("id", jobId).eq("user_id", userId);
+    if (pauseError) throw pauseError;
+    const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+    if (archiveError) throw archiveError;
+    return { job_id: jobId, outcome: "paused_provider_not_configured" };
+  }
+
+  const failures: ProviderFailure[] = [];
+  for (const provider of providers) {
+    const { data: attempt, error: attemptError } = await admin
+      .from("job_attempts")
+      .insert({ job_id: jobId, provider: provider.name, status: "started" })
+      .select("id")
+      .single();
+    if (attemptError) throw attemptError;
+
+    let story: string;
+    try {
+      story = await provider.run();
+    } catch (error) {
+      const failure = classifyFailure(provider.name, error);
+      failures.push(failure);
+      const { error: failureUpdateError } = await admin.from("job_attempts").update({
+        status: failure.quota ? "quota_exhausted" : failure.status === 429 ? "rate_limited" : "failed",
+        error_code: failure.status === null ? "network_error" : "http_" + failure.status,
+        safe_error_message: failure.message,
+        finished_at: new Date().toISOString(),
+      }).eq("id", attempt.id);
+      if (failureUpdateError) throw failureUpdateError;
+      continue;
+    }
+
+    const { error: attemptUpdateError } = await admin.from("job_attempts").update({
+      status: "succeeded",
+      finished_at: new Date().toISOString(),
+    }).eq("id", attempt.id);
+    if (attemptUpdateError) throw attemptUpdateError;
+
+    const { error: jobUpdateError } = await admin.from("jobs").update({
+      status: "paused",
+      input: { ...job.input, stage: "story_ready" },
+      output: {
+        stage: "story_ready",
+        story,
+        provider: provider.name,
+        generated_at: new Date().toISOString(),
+      },
+      error_code: null,
+      error_message: null,
+      attempt_count: Number(job.attempt_count ?? 0) + failures.length + 1,
+      updated_at: new Date().toISOString(),
+    }).eq("id", jobId).eq("user_id", userId);
+    if (jobUpdateError) throw jobUpdateError;
+
+    const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+    if (archiveError) throw archiveError;
+    return { job_id: jobId, outcome: "story_ready", provider: provider.name };
+  }
+
+  const retryable = failures.every((failure) => failure.retryable);
+  const delaySeconds = failures.some((failure) => failure.quota) ? 1800 : 300;
+  if (retryable) {
+    const runAfter = new Date(Date.now() + delaySeconds * 1000).toISOString();
+    const { error: retryUpdateError } = await admin.from("jobs").update({
+      status: "waiting_retry",
+      error_code: failures.some((failure) => failure.quota) ? "provider_quota_exhausted" : "provider_temporarily_unavailable",
+      error_message: "All configured providers are temporarily unavailable. RJ will retry automatically.",
+      run_after: runAfter,
+      attempt_count: Number(job.attempt_count ?? 0) + failures.length,
+      updated_at: new Date().toISOString(),
+    }).eq("id", jobId).eq("user_id", userId);
+    if (retryUpdateError) throw retryUpdateError;
+    const { error: enqueueError } = await admin.rpc("rj_retry_job", {
+      p_message: payload,
+      p_delay_seconds: delaySeconds,
+    });
+    if (enqueueError) throw enqueueError;
+    const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+    if (archiveError) throw archiveError;
+    return { job_id: jobId, outcome: "waiting_retry", delay_seconds: delaySeconds };
+  }
+
+  const { error: failedUpdateError } = await admin.from("jobs").update({
+    status: "failed",
+    error_code: "all_providers_failed",
+    error_message: failures.map((failure) => failure.provider + ": " + failure.message).join(" | ").slice(0, 1000),
+    attempt_count: Number(job.attempt_count ?? 0) + failures.length,
+    updated_at: new Date().toISOString(),
+  }).eq("id", jobId).eq("user_id", userId);
+  if (failedUpdateError) throw failedUpdateError;
+  const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+  if (archiveError) throw archiveError;
+  return { job_id: jobId, outcome: "failed", providers_tried: failures.map((failure) => failure.provider) };
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method !== "POST") return response({ error: "Method not allowed" }, 405);
+
+  const token = req.headers.get("x-rj-worker-token") ?? "";
+  const { data: authorized, error: authError } = await admin.rpc("rj_validate_worker_token", { p_token: token });
+  if (authError || authorized !== true) return response({ error: "Unauthorized" }, 401);
+
+  let resumed = 0;
+  const { data: resumedCount, error: resumeError } = await admin.rpc("rj_requeue_paused_jobs", { p_limit: 5 });
+  if (resumeError) {
+    console.error("RJ paused-job resume failed", resumeError.message);
+  } else {
+    resumed = Number(resumedCount ?? 0);
+  }
+
+  const { data: messages, error } = await admin.rpc("rj_read_jobs", { p_qty: 2 });
+  if (error) {
+    console.error("RJ queue read failed", error.message);
+    return response({ error: "Queue read failed" }, 500);
+  }
+
+  const results = [];
+  for (const message of (messages ?? []) as QueueMessage[]) {
+    try {
+      results.push(await processJob(message));
+    } catch (error) {
+      console.error("RJ job processing failed", error);
+      results.push({ msg_id: String(message.msg_id), outcome: "processing_error" });
+      // Do not archive on unexpected errors. PGMQ visibility timeout makes the job available again.
+    }
+  }
+
+  return response({ ok: true, resumed, processed: results.length, results });
+});
