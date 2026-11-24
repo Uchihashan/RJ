@@ -14,9 +14,15 @@ import {
 import { StatusBar } from "expo-status-bar";
 import * as SecureStore from "expo-secure-store";
 import * as LocalAuthentication from "expo-local-authentication";
+import * as Notifications from "expo-notifications";
 
 type Tab = "Home" | "Create" | "Schedule" | "Settings";
 type Job = { id: string; topic: string; language: string; createdAt: string; status: string };
+type Reminder = { id: string; title: string; time: string; notificationId: string | null };
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false })
+});
 
 const RED = "#F3263D";
 const BG = "#080808";
@@ -75,7 +81,7 @@ export default function App() {
   const [chatReply, setChatReply] = useState("வணக்கம்! இன்று என்ன வேலை செய்யலாம்? / Vanakkam! What shall we work on today?");
   const [scheduleTitle, setScheduleTitle] = useState("");
   const [scheduleTime, setScheduleTime] = useState("18:00");
-  const [reminders, setReminders] = useState<string[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [pin, setPin] = useState("");
   const [pinConfigured, setPinConfigured] = useState(false);
   const [password, setPassword] = useState("");
@@ -91,8 +97,7 @@ export default function App() {
       const savedJobs = await AsyncStorage.getItem("rj_video_jobs");
       const savedReminders = await AsyncStorage.getItem("rj_reminders");
       if (savedJobs) setJobs(JSON.parse(savedJobs) as Job[]);
-      if (savedReminders) setReminders(JSON.parse(savedReminders) as string[]);
-      setDataLoaded(true);
+      if (savedReminders) setReminders(JSON.parse(savedReminders) as Reminder[]);
       const savedPin = await SecureStore.getItemAsync("rj_local_pin");
       const savedBio = await SecureStore.getItemAsync("rj_biometric_enabled");
       const savedPassword = await SecureStore.getItemAsync("rj_local_password");
@@ -103,7 +108,11 @@ export default function App() {
       const hardware = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
       setBiometricAvailable(hardware && enrolled);
-    })();
+      setDataLoaded(true);
+    })().catch(() => {
+      Alert.alert("RJ startup issue", "Some saved settings could not be loaded. Please reopen RJ.");
+      setDataLoaded(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -140,15 +149,42 @@ export default function App() {
     setChat("");
   };
 
-  const addReminder = () => {
+  const addReminder = async () => {
     const title = scheduleTitle.trim();
     if (!title) {
       Alert.alert("Reminder needed", "Enter what you want RJ to remind you about.");
       return;
     }
-    setReminders(current => [...current, title + " • " + scheduleTime]);
+    if (!/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(scheduleTime)) {
+      Alert.alert("Time not valid", "Use 24-hour format, for example 18:30.");
+      return;
+    }
+    let notificationId: string | null = null;
+    try {
+      if (Platform.OS === "android") {
+        await Notifications.setNotificationChannelAsync("rj-reminders", {
+          name: "RJ reminders", importance: Notifications.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250], lightColor: RED
+        });
+      }
+      const current = await Notifications.getPermissionsAsync();
+      const permission = current.status === "granted" ? current : await Notifications.requestPermissionsAsync();
+      if (permission.status === "granted") {
+        const [hour, minute] = scheduleTime.split(":").map(Number);
+        const date = new Date();
+        date.setHours(hour, minute, 0, 0);
+        if (date.getTime() <= Date.now()) date.setDate(date.getDate() + 1);
+        notificationId = await Notifications.scheduleNotificationAsync({
+          content: { title: "RJ Reminder", body: title, sound: "default" },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date, channelId: "rj-reminders" }
+        });
+      }
+    } catch {
+      Alert.alert("Notification unavailable", "The reminder will still be saved inside RJ, but Android notification scheduling failed.");
+    }
+    const item: Reminder = { id: String(Date.now()), title, time: scheduleTime, notificationId };
+    setReminders(current => [item, ...current]);
     setScheduleTitle("");
-    Alert.alert("Reminder saved", "Saved on this device. Background notifications will be added in the next stage.");
+    Alert.alert("Reminder saved", notificationId ? "RJ will notify you at the selected time." : "Saved in RJ. Allow notifications in Android settings to receive an alert.");
   };
 
   const savePin = async () => {
@@ -278,7 +314,7 @@ export default function App() {
       <Field label="Task" value={scheduleTitle} onChangeText={setScheduleTitle} placeholder="Example: Prepare today's kids story" />
       <Field label="Time (24-hour)" value={scheduleTime} onChangeText={setScheduleTime} placeholder="18:00" />
       <ActionButton title="Save reminder" onPress={addReminder} />
-      <Text style={styles.note}>Reminders are currently stored only while the app is open. Reliable background notifications and daily task automation are planned for the next stage.</Text>
+      <Text style={styles.note}>RJ schedules local Android notifications. Delivery time can still be affected by Android battery and alarm settings.</Text>
       <View style={styles.divider} />
       <Text style={styles.sectionTitle}>Saved reminders</Text>
       {reminders.length === 0 ? <Text style={styles.muted}>Nothing scheduled yet.</Text> : reminders.map((r, i) => <Text key={i} style={styles.listLine}>• {r}</Text>)}
@@ -317,6 +353,10 @@ export default function App() {
       </View>
     </>
   );
+
+  if (!dataLoaded) {
+    return <View style={[styles.screen, styles.lockScreen]}><StatusBar style="light" /><Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text><Text style={styles.muted}>Loading your secure workspace…</Text></View>;
+  }
 
   if (locked) {
     return (
