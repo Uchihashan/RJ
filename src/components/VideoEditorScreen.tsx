@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 type Project = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string };
-type Props = { projects: Project[]; onSave: (id: string, topic: string, story: string) => void };
+type Props = { projects: Project[]; onSave: (id: string, topic: string, story: string, description: string, ratio: string, captions: boolean) => void };
 
 const RED = "#F3263D";
 
@@ -44,7 +44,7 @@ export default function VideoEditorScreen({ projects, onSave }: Props) {
       Alert.alert("Script needed", "This project does not have a generated story/script yet.");
       return;
     }
-    onSave(selectedId, title.trim() || "Untitled video", script);
+    onSave(selectedId, title.trim() || "Untitled video", script, description, ratio, captions);
     Alert.alert("Edits saved", "Your title and script changes are saved to this RJ project. Video rendering/export is the next integration stage.");
   };
 
