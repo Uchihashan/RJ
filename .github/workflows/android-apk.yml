@@ -61,8 +61,6 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --non-interactive
 
-      # assembleRelease invokes the Expo/React Native Gradle bundle task,
-      # packaging index.android.bundle into the APK for standalone launch.
       - name: Build release APK with embedded JavaScript bundle
         working-directory: android
         run: ./gradlew --no-daemon assembleRelease
@@ -70,7 +68,8 @@ jobs:
       - name: Verify APK and embedded JavaScript bundle
         run: |
           test -s android/app/build/outputs/apk/release/app-release.apk
-          test -s android/app/build/generated/assets/createBundleReleaseJsAndAssets/index.android.bundle
+          test -s android/app/build/generated/assets/react/release/index.android.bundle
+          unzip -l android/app/build/outputs/apk/release/app-release.apk | grep -q 'assets/index.android.bundle'
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
