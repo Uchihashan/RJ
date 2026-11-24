@@ -101,6 +101,54 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
 
   useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true);
+      return;
+    }
+    const client = supabase;
+    client.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthReady(true);
+    }).catch(() => setAuthReady(true));
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+    });
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") client.auth.startAutoRefresh();
+      else client.auth.stopAutoRefresh();
+    });
+    return () => {
+      subscription.unsubscribe();
+      appStateSubscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session || !supabase) return;
+    let active = true;
+    supabase.from("jobs")
+      .select("id,input,status,created_at")
+      .eq("user_id", session.user.id)
+      .eq("job_type", "video_generation")
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (!active || error || !data) return;
+        const remoteJobs: Job[] = data.map((row: any) => ({
+          id: row.id,
+          topic: String(row.input?.topic ?? "Untitled project"),
+          language: String(row.input?.language ?? "Tamil"),
+          createdAt: new Date(row.created_at).toLocaleString(),
+          status: row.status === "completed" ? "Completed" : "Saved — generation not connected"
+        }));
+        setJobs(current => {
+          const merged = [...remoteJobs, ...current.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
+          return merged;
+        });
+      });
+    return () => { active = false; };
+  }, [session]);
+
+  useEffect(() => {
     (async () => {
       const savedJobs = await AsyncStorage.getItem("rj_video_jobs");
       const savedReminders = await AsyncStorage.getItem("rj_reminders");
