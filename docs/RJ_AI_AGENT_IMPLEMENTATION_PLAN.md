@@ -80,3 +80,63 @@ The separate RJ Supabase backend already contains RLS-protected profile, setting
 ## Safety boundary
 
 Do not merge this branch into `main` or deploy production changes without the user's explicit approval. Never use NOOR infrastructure, credentials, or data for RJ.
+
+
+## Non-negotiable requirement: Autonomous Video Operations
+
+The user requires RJ to operate as an autonomous, cloud-run video production and publishing agent. This is a product requirement, not an optional enhancement to the editor.
+
+### A. Capability-based provider failover
+
+- Every production stage must declare required capabilities and accepted output formats: script/text, image, video clips, speech, transcription, captions, media assembly/rendering, storage, and YouTube publishing.
+- Maintain a server-side provider registry with per-user connection state, supported capabilities, model/format constraints, region availability, quota/rate-limit state, health, estimated cost, and priority.
+- Before a stage starts, select the best eligible provider for that exact capability and the user's quality/budget policy.
+- On quota exhaustion (HTTP 429, provider quota/resource-exhausted response), cooldown that provider for the provider-reported reset time when available; otherwise use bounded exponential backoff. Immediately try the next compatible, connected, user-authorized provider.
+- Also fail over for transient network/5xx/provider outages. Do not blindly retry invalid credentials, unsupported formats, policy blocks, or invalid input; mark the provider/configuration as needing attention and continue only with a compatible alternative.
+- Persist every attempt and provider decision. Do not repeat a paid operation after an ambiguous timeout unless the provider supports idempotency or the previous result has been reconciled.
+- Never claim that every job can always finish: if every compatible provider is unavailable, out of quota, disconnected, or over the user's budget, keep the job durable and resumable, show exactly which stage is blocked, and notify the user. Never silently switch to a paid provider without the user's prior spending permission.
+- No single vendor is mandatory. Integrations must be replaceable adapters; never depend on private browser cookies or unofficial web scraping.
+
+### B. Complete video pipeline
+
+A job is not complete when a story/script is generated. Track durable stages independently:
+1. Brief and schedule validation
+2. Script and storyboard
+3. Scene asset generation
+4. Voice-over and audio
+5. Captions/subtitle timing
+6. Timeline assembly and editing
+7. Render/export
+8. Quality checks and final preview
+9. YouTube metadata and thumbnail
+10. Upload as private/scheduled, then verify the platform's returned video ID and scheduled publish time
+
+Each stage stores inputs, outputs, provider, attempt history, timestamps, and retry state. A retry resumes from the last verified successful stage; it must not regenerate or re-charge completed stages unnecessarily. The final deliverable must be an actual playable video file, not just an editor form or script.
+
+### C. Multi-channel / multi-recipient publishing calendar
+
+- Support multiple independently authorized YouTube channels/destinations, each with its own encrypted OAuth tokens, channel identity, timezone, upload defaults, and permissions.
+- Let the user create a publishing plan in one request: destination/channel, video count, dates, exact local times, language/topic/template, visibility, and optional recurrence.
+- Support separate plans for two or more people/channels, with isolated content, assets, credentials, and schedules. Never cross-post to another person's channel unless that channel owner has authorized the connection and the user has permission to publish there.
+- Store schedule timestamps as timezone-aware instants and retain the IANA timezone used to enter them. Default the user's local schedule UI to Asia/Colombo only when that is the user's selected timezone.
+- Show a calendar/list with queued, generating, ready, upload-pending, scheduled, published, retrying, blocked, and failed states. Allow reschedule, pause, cancel, and retry.
+- Before the deadline, generate and render early enough to leave a configurable safety buffer. The scheduled publish time is the target; do not wait until the last minute to begin generation.
+- Prefer YouTube's supported scheduled-publishing flow: upload the completed video as private with the approved publish time when supported, then verify the video resource. If the channel/API does not support the requested operation or quota is exhausted, preserve the asset and report the exact issue; do not falsely mark it published.
+
+### D. App-closed execution and reliability
+
+- The Android app is only the control panel. Once a plan is saved, cloud database + durable queue + scheduled cloud worker own execution. Android background timers, local notifications, or the app remaining open must never be required.
+- Use the existing Supabase Postgres/pgmq queue and pg_cron worker as the durable scheduling foundation; extend the existing minute worker rather than creating a second competing scheduler.
+- Workers must claim work safely, use idempotency keys, lease/visibility timeouts, bounded concurrency, retry/backoff, dead-letter/blocked states, and periodic recovery of expired leases.
+- Each stage commits progress before proceeding. If a worker is restarted or a function reaches its runtime limit, another worker resumes from stored state.
+- Alert on deadline risk and final failure. The app should display server-side status whenever reopened; push notifications are helpful but not the source of truth.
+
+### E. Implementation order and acceptance tests
+
+1. Provider registry + capability-aware router + quota cooldown and attempt history.
+2. Durable pipeline stage state machine + resumable workers.
+3. Multi-channel OAuth credential isolation and YouTube publishing adapter.
+4. Calendar UI for bulk plans, multiple destinations, timezone-aware scheduling, and run status.
+5. End-to-end media rendering and verification.
+
+Acceptance tests must include: provider A returns 429 and provider B completes the same stage; all providers unavailable then job resumes after cooldown; app is force-closed and a scheduled job still runs; two channels receive only their own assigned videos; duplicate cron/worker invocations do not create duplicate uploads; a render completed early is published at the requested local time; a deadline cannot be met and RJ reports it rather than claiming success; and no paid fallback runs without prior consent.
