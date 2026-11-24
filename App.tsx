@@ -18,8 +18,10 @@ import * as SecureStore from "expo-secure-store";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Notifications from "expo-notifications";
 import ToolHubScreen from "./src/components/ToolHubScreen";
+import AssistantScreen from "./src/components/AssistantScreen";
+import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
-type Tab = "Home" | "Create" | "Tools" | "Schedule" | "Settings";
+type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
 type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string };
 
 function jobStatusLabel(row: any): string {
@@ -538,13 +540,7 @@ export default function App() {
         <Text style={styles.heroSub}>உங்கள் அடுத்த வேலையைச் சொல்லுங்கள்.</Text>
         <Text style={styles.heroSub}>Tell RJ what you want to get done today.</Text>
       </View>
-      <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>Assistant</Text>
-        <Text style={styles.reply}>{chatReply}</Text>
-        <Field label="Your message" value={chat} onChangeText={setChat} placeholder="Tamil / Tanglish / English..." multiline />
-        <ActionButton title="Send message" onPress={sendChat} />
-        <Text style={styles.note}>AI replies are not connected yet. This screen is ready for the assistant backend.</Text>
-      </View>
+      <AssistantScreen />
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.quickRow}>
@@ -724,14 +720,15 @@ export default function App() {
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
         {tab === "Home" && renderHome()}
         {tab === "Create" && renderCreate()}
+        {tab === "Edit" && <VideoEditorScreen projects={jobs} onSave={(id, nextTopic, nextStory) => setJobs(current => current.map(job => job.id === id ? { ...job, topic: nextTopic, story: nextStory, status: "Edits saved — ready for rendering" } : job))} />}
         {tab === "Tools" && <ToolHubScreen geminiConnected={!!providerStatus.gemini} openRouterConnected={!!providerStatus.openrouter} onOpenSettings={() => setTab("Settings")} />}
         {tab === "Schedule" && renderSchedule()}
         {tab === "Settings" && renderSettings()}
       </ScrollView>
       <View style={styles.tabBar}>
-        {(["Home", "Create", "Tools", "Schedule", "Settings"] as Tab[]).map(item => (
+        {(["Home", "Create", "Edit", "Tools", "Schedule", "Settings"] as Tab[]).map(item => (
           <Pressable key={item} onPress={() => setTab(item)} style={styles.tabItem}>
-            <Text style={[styles.tabIcon, tab === item && { color: RED }]}>{item === "Home" ? "⌂" : item === "Create" ? "＋" : item === "Tools" ? "◇" : item === "Schedule" ? "◷" : "⚙"}</Text>
+            <Text style={[styles.tabIcon, tab === item && { color: RED }]}>{item === "Home" ? "⌂" : item === "Create" ? "＋" : item === "Edit" ? "✎" : item === "Tools" ? "◇" : item === "Schedule" ? "◷" : "⚙"}</Text>
             <Text style={[styles.tabLabel, tab === item && { color: "#FFFFFF" }]}>{item}</Text>
             {tab === item && <View style={styles.tabUnderline} />}
           </Pressable>
