@@ -19,7 +19,19 @@ import * as LocalAuthentication from "expo-local-authentication";
 import * as Notifications from "expo-notifications";
 
 type Tab = "Home" | "Create" | "Schedule" | "Settings";
-type Job = { id: string; topic: string; language: string; createdAt: string; status: string };
+type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string };
+
+function jobStatusLabel(row: any): string {
+  if (row.output?.stage === "story_ready") return "Story ready — voice and video steps next";
+  if (row.status === "queued") return "Queued — RJ worker will check providers";
+  if (row.status === "running") return "Generating story…";
+  if (row.status === "waiting_retry") return "Provider busy — automatic retry scheduled";
+  if (row.status === "paused" && row.error_code === "provider_not_configured") return "Paused — AI provider key needed";
+  if (row.status === "paused") return "Paused";
+  if (row.status === "completed") return "Completed";
+  if (row.status === "failed") return "Failed — check settings and try again";
+  return row.status;
+}
 type Reminder = { id: string; title: string; time: string; notificationId: string | null };
 
 Notifications.setNotificationHandler({
@@ -142,7 +154,7 @@ export default function App() {
       localJobsFallback = localJobs;
       if (active) setJobs(localJobs);
       const { data, error } = await supabase.from("jobs")
-        .select("id,input,status,created_at")
+        .select("id,input,status,created_at,output,error_code")
         .eq("user_id", session.user.id)
         .eq("job_type", "video_generation")
         .order("created_at", { ascending: false });
@@ -157,7 +169,8 @@ export default function App() {
         topic: String(row.input?.topic ?? "Untitled project"),
         language: String(row.input?.language ?? "Tamil"),
         createdAt: new Date(row.created_at).toLocaleString(),
-        status: row.status === "completed" ? "Completed" : "Saved — generation not connected"
+        status: jobStatusLabel(row),
+        story: typeof row.output?.story === "string" ? row.output.story : undefined
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
       if (active) {
@@ -173,6 +186,31 @@ export default function App() {
     });
     return () => { active = false; };
   }, [session, dataLoaded, authReady]);
+
+  useEffect(() => {
+    if (!session || !supabase) return;
+    let active = true;
+    const refreshJobs = async () => {
+      const { data, error } = await supabase.from("jobs")
+        .select("id,input,status,created_at,output,error_code")
+        .eq("user_id", session.user.id)
+        .eq("job_type", "video_generation")
+        .order("created_at", { ascending: false });
+      if (!active || error || !data) return;
+      const remoteJobs: Job[] = data.map((row: any) => ({
+        id: row.id,
+        topic: String(row.input?.topic ?? "Untitled project"),
+        language: String(row.input?.language ?? "Tamil"),
+        createdAt: new Date(row.created_at).toLocaleString(),
+        status: jobStatusLabel(row),
+        story: typeof row.output?.story === "string" ? row.output.story : undefined
+      }));
+      setJobs(remoteJobs);
+      setJobsOwnerId(session.user.id);
+    };
+    const interval = setInterval(refreshJobs, 20000);
+    return () => { active = false; clearInterval(interval); };
+  }, [session]);
 
   useEffect(() => {
     (async () => {
@@ -217,21 +255,24 @@ export default function App() {
       topic: clean,
       language,
       createdAt: new Date().toLocaleString(),
-      status: "Saved — generation not connected"
+      status: "Queued — RJ worker will check providers"
     };
     if (session && supabase) {
       const { data, error } = await supabase.from("jobs").insert({
         user_id: session.user.id,
         job_type: "video_generation",
-        status: "paused",
-        input: { topic: clean, language, stage: "idea_saved" }
+        status: "queued",
+        input: { topic: clean, language, stage: "queued" }
       }).select("id").single();
       if (data?.id) item.id = data.id;
-      if (error) Alert.alert("Cloud save issue", "The idea is saved on this phone, but cloud sync failed. Please check your connection.");
+      if (error) {
+        Alert.alert("Cloud queue issue", "RJ could not send this project to the cloud worker. Please check your connection and try again.");
+        return;
+      }
     }
     setJobs(current => [item, ...current]);
     setTopic("");
-    Alert.alert("Saved to RJ", "Your video idea is saved. Connect an AI video service to generate the full video.");
+    Alert.alert("Added to RJ queue", "Your story request is safely queued. If no AI provider key is configured yet, RJ will pause it without losing the job.");
     setTab("Create");
   };
 
@@ -425,8 +466,8 @@ export default function App() {
           </Pressable>
         ))}
       </View>
-      <ActionButton title="Save video idea" onPress={createJob} />
-      <Text style={styles.note}>Full story writing, voice-over, visuals, subtitles, editing and YouTube upload need AI and YouTube connections. They are not active yet.</Text>
+      <ActionButton title="Queue story generation" onPress={createJob} />
+      <Text style={styles.note}>Story generation runs through RJ’s background queue when a Gemini or Groq key is configured. Voice-over, visuals, subtitles, rendering and YouTube publishing are still separate stages.</Text>
       <View style={styles.divider} />
       <Text style={styles.sectionTitle}>Your video projects</Text>
       {jobs.length === 0 ? <Text style={styles.muted}>No projects yet. Add your first topic above.</Text> : jobs.map(job => (
@@ -434,6 +475,7 @@ export default function App() {
           <Text style={styles.jobTitle}>{job.topic}</Text>
           <Text style={styles.muted}>{job.language} • {job.createdAt}</Text>
           <Text style={styles.jobStatus}>{job.status}</Text>
+          {job.story ? <Text style={styles.muted}>{job.story.slice(0, 420)}{job.story.length > 420 ? "…" : ""}</Text> : null}
         </View>
       ))}
     </View>
