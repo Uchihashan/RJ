@@ -405,8 +405,8 @@ export default function App() {
         <Text style={styles.sectionTitle}>Connections</Text>
         <Text style={styles.listLine}>AI video provider: <Text style={styles.pending}>Not connected</Text></Text>
         <Text style={styles.listLine}>YouTube account: <Text style={styles.pending}>Not connected</Text></Text>
-        <Text style={styles.listLine}>Cloud sync: <Text style={styles.pending}>Not connected</Text></Text>
-        <Text style={styles.note}>Connection setup will be added after the core app screens are tested. Never paste API keys into public code.</Text>
+        <Text style={styles.listLine}>Cloud sync: <Text style={{ color: "#53C98B", fontWeight: "700" }}>Account and project sync connected</Text></Text>
+        <Text style={styles.note}>RJ account and project cloud sync are connected. AI video providers and YouTube OAuth are still pending. Never paste private API keys into public code.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>About RJ</Text>
