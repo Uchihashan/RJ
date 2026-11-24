@@ -155,7 +155,7 @@ export default function App() {
       Alert.alert("Reminder needed", "Enter what you want RJ to remind you about.");
       return;
     }
-    if (!/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(scheduleTime)) {
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(scheduleTime)) {
       Alert.alert("Time not valid", "Use 24-hour format, for example 18:30.");
       return;
     }
@@ -275,7 +275,7 @@ export default function App() {
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Today's reminders</Text>
-        {reminders.length === 0 ? <Text style={styles.muted}>No reminders saved yet.</Text> : reminders.map((r, i) => <Text key={i} style={styles.listLine}>• {r}</Text>)}
+        {reminders.length === 0 ? <Text style={styles.muted}>No reminders saved yet.</Text> : reminders.map(r => <Text key={r.id} style={styles.listLine}>• {r.title} • {r.time}</Text>)}
       </View>
     </>
   );
