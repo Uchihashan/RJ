@@ -22,7 +22,7 @@ import AssistantScreen from "./src/components/AssistantScreen";
 import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
 type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
-type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string };
+type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean };
 
 function jobStatusLabel(row: any): string {
   if (row.output?.stage === "story_ready") return "Story ready — voice and video steps next";
@@ -183,7 +183,7 @@ export default function App() {
         language: String(row.input?.language ?? "Tamil"),
         createdAt: new Date(row.created_at).toLocaleString(),
         status: jobStatusLabel(row),
-        story: typeof row.output?.story === "string" ? row.output.story : undefined
+        story: typeof row.output?.story === "string" ? row.output.story : undefined,\n        description: typeof row.input?.description === "string" ? row.input.description : undefined,\n        aspectRatio: typeof row.input?.aspect_ratio === "string" ? row.input.aspect_ratio : undefined,\n        captionsEnabled: typeof row.input?.captions_enabled === "boolean" ? row.input.captions_enabled : undefined
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
       if (active) {
@@ -423,10 +423,10 @@ export default function App() {
     if (error) Alert.alert("Sign-out issue", error.message);
   };
 
-  const saveProjectEdits = async (id: string, nextTopic: string, nextStory: string) => {
+  const saveProjectEdits = async (id: string, nextTopic: string, nextStory: string, description: string, aspectRatio: string, captionsEnabled: boolean) => {
     const existing = jobs.find(job => job.id === id);
     setJobs(current => current.map(job => job.id === id
-      ? { ...job, topic: nextTopic, story: nextStory, status: "Edits saved — ready for rendering" }
+      ? { ...job, topic: nextTopic, story: nextStory, description, aspectRatio, captionsEnabled, status: "Edits saved — ready for rendering" }
       : job));
     if (session && supabase && existing && /^[0-9a-f-]{36}$/i.test(id)) {
       const { error } = await supabase.rpc("rj_update_video_project", {
