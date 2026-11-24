@@ -17,8 +17,9 @@ import { StatusBar } from "expo-status-bar";
 import * as SecureStore from "expo-secure-store";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Notifications from "expo-notifications";
+import ToolHubScreen from "./src/components/ToolHubScreen";
 
-type Tab = "Home" | "Create" | "Schedule" | "Settings";
+type Tab = "Home" | "Create" | "Tools" | "Schedule" | "Settings";
 type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string };
 
 function jobStatusLabel(row: any): string {
@@ -723,13 +724,14 @@ export default function App() {
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
         {tab === "Home" && renderHome()}
         {tab === "Create" && renderCreate()}
+        {tab === "Tools" && <ToolHubScreen geminiConnected={!!providerStatus.gemini} openRouterConnected={!!providerStatus.openrouter} onOpenSettings={() => setTab("Settings")} />}
         {tab === "Schedule" && renderSchedule()}
         {tab === "Settings" && renderSettings()}
       </ScrollView>
       <View style={styles.tabBar}>
-        {(["Home", "Create", "Schedule", "Settings"] as Tab[]).map(item => (
+        {(["Home", "Create", "Tools", "Schedule", "Settings"] as Tab[]).map(item => (
           <Pressable key={item} onPress={() => setTab(item)} style={styles.tabItem}>
-            <Text style={[styles.tabIcon, tab === item && { color: RED }]}>{item === "Home" ? "⌂" : item === "Create" ? "＋" : item === "Schedule" ? "◷" : "⚙"}</Text>
+            <Text style={[styles.tabIcon, tab === item && { color: RED }]}>{item === "Home" ? "⌂" : item === "Create" ? "＋" : item === "Tools" ? "◇" : item === "Schedule" ? "◷" : "⚙"}</Text>
             <Text style={[styles.tabLabel, tab === item && { color: "#FFFFFF" }]}>{item}</Text>
             {tab === item && <View style={styles.tabUnderline} />}
           </Pressable>
