@@ -18,6 +18,8 @@ RJ is a personal-use Android app with a fixed **black + red** visual identity. T
 - Tamil / Tanglish / English video language selector.
 - Local video idea persistence and Android reminder notifications.
 - Separate RJ Supabase backend in Singapore with five RLS-protected tables: profiles, user_settings, jobs, job_attempts and schedules.
+- Durable `pgmq` queue `rj_jobs` created for future background processing; queue consumer and provider pipeline are not deployed yet.
+- Database migrations are tracked under `supabase/migrations/`.
 - Supabase email account creation/sign-in with persisted sessions stored through Expo SecureStore.
 - Signed-in users can save and reload their video project ideas through their own account; project rows are isolated by RLS.
 - PIN and password storage using Expo SecureStore.
@@ -29,7 +31,7 @@ RJ is a personal-use Android app with a fixed **black + red** visual identity. T
 These are deliberately shown as pending rather than faked:
 - AI model/provider APIs and automatic free-tier fallback.
 - Story, voice, image/video generation and rendering pipeline.
-- Background worker that claims saved jobs, retries providers, and resumes interrupted generation. Job records are persisted, but generation is not running yet.
+- Background worker that consumes `rj_jobs`, retries providers, and resumes interrupted generation. The durable queue exists, but no consumer is deployed and generation is not running yet.
 - YouTube OAuth, upload, privacy state and scheduled publishing.
 - Cloud backup for local reminders and push notifications.
 - Signed release APK.
