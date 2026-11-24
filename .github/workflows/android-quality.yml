@@ -1,0 +1,54 @@
+name: RJ Android quality checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rj-android-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Android app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+          cache: npm
+          cache-dependency-path: package.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Check Expo dependency compatibility
+        run: npx expo install --check
+
+      - name: Run Expo Doctor
+        run: npx expo-doctor
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Export Android bundle
+        run: npx expo export --platform android --output-dir dist
+
+      - name: Upload Android bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: rj-android-js-bundle
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
