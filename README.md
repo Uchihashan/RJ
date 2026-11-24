@@ -21,6 +21,7 @@ RJ is a personal-use Android app with a fixed **black + red** visual identity. T
 - PIN and password storage using Expo SecureStore.
 - Device biometric unlock using Expo Local Authentication.
 - GitHub Actions quality workflow: dependency compatibility, Expo Doctor, TypeScript check and Android bundle export.
+- GitHub Actions Android build workflow: creates an installable debug APK artifact on every push/PR to `main`.
 
 ## Not connected yet
 These are deliberately shown as pending rather than faked:
@@ -52,7 +53,7 @@ GitHub Actions runs on pushes and pull requests to `main`:
 4. Use a development build for native notification testing.
 
 ## APK build
-The repository includes an EAS preview profile. A real APK still requires an Expo/EAS project association and authorized build credentials. After setup, use `eas build --platform android --profile preview`.
+GitHub Actions now builds an installable debug APK artifact on pushes and pull requests. Open the repository's **Actions** tab, select **Build RJ Android APK**, and download the `RJ-android-debug-apk` artifact when the run succeeds. A signed production APK/AAB still requires release signing and a production build profile.
 
 ## Project boundary
 This repository is **RJ only**. It is separate from the user's NOOR project.
