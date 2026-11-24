@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-type Project = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string };
+type Project = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean };
 type Props = { projects: Project[]; onSave: (id: string, topic: string, story: string, description: string, ratio: string, captions: boolean) => void };
 
 const RED = "#F3263D";
@@ -25,14 +25,18 @@ export default function VideoEditorScreen({ projects, onSave }: Props) {
     setSelectedId(current.id);
     setTitle(current.topic);
     setScript(current.story ?? "");
-    setDescription(current.topic + " | " + current.language);
+    setDescription(current.description ?? (current.topic + " | " + current.language));
+    setRatio((current.aspectRatio as "16:9" | "9:16" | "1:1") || "16:9");
+    setCaptions(current.captionsEnabled ?? true);
   }, [projects, selectedId]);
 
   const choose = (project: Project) => {
     setSelectedId(project.id);
     setTitle(project.topic);
     setScript(project.story ?? "");
-    setDescription(project.topic + " | " + project.language);
+    setDescription(project.description ?? (project.topic + " | " + project.language));
+    setRatio((project.aspectRatio as "16:9" | "9:16" | "1:1") || "16:9");
+    setCaptions(project.captionsEnabled ?? true);
   };
 
   const save = () => {
