@@ -18,27 +18,35 @@ RJ is a personal-use Android app with a fixed **black + red** visual identity. T
 - Tamil / Tanglish / English video language selector.
 - Local video idea persistence and Android reminder notifications.
 - Separate RJ Supabase backend in Singapore with five RLS-protected tables: profiles, user_settings, jobs, job_attempts and schedules.
-- Durable `pgmq` queue `rj_jobs` created for future background processing; queue consumer and provider pipeline are not deployed yet.
-- Database migrations are tracked under `supabase/migrations/`.
+- Durable `pgmq` queue `rj_jobs`, database enqueue trigger, and a Supabase Edge Function worker deployed as `rj-worker`.
+- Supabase Cron invokes the worker every minute; a random worker token is stored encrypted in Supabase Vault.
+- Per-user Gemini and OpenRouter API keys are stored encrypted in Vault through authenticated RPCs; keys are never returned to the app.
+- Story worker tries Gemini first, then OpenRouter's `openrouter/free` route. It does not automatically call paid models.
+- Quota/rate-limit and transient failures are recorded in `job_attempts`; jobs are delayed and retried. Jobs paused for missing provider keys automatically resume after a key is saved.
+- Database migrations and Edge Function source are tracked under `supabase/`.
 - Supabase email account creation/sign-in with persisted sessions stored through Expo SecureStore.
 - Signed-in users can save and reload their video project ideas through their own account; project rows are isolated by RLS.
 - PIN and password storage using Expo SecureStore.
 - Device biometric unlock using Expo Local Authentication.
 - GitHub Actions quality workflow: dependency compatibility, Expo Doctor, TypeScript check and Android bundle export.
-- GitHub Actions Android build workflow: creates an installable debug APK artifact on every push/PR to `main`.
+- GitHub Actions Android build workflow: attempts an installable debug APK artifact on every push/PR to `main`; artifact availability depends on a successful run.
+
+## Current AI pipeline boundary
+- The background worker and free-first story provider adapters are deployed, but real provider calls are not yet verified because no provider API keys have been added.
+- Once a key is saved in RJ Settings, the worker can generate and save the story script. Story-ready jobs are paused at the next stage until voice, visuals and rendering are implemented.
+- Gemini and OpenRouter free usage have changing quotas and availability. OpenRouter's free router is rate-limited; it is not unlimited free compute.
 
 ## Not connected yet
 These are deliberately shown as pending rather than faked:
-- AI model/provider APIs and automatic free-tier fallback.
-- Story, voice, image/video generation and rendering pipeline.
-- Background worker that consumes `rj_jobs`, retries providers, and resumes interrupted generation. The durable queue exists, but no consumer is deployed and generation is not running yet.
-- YouTube OAuth, upload, privacy state and scheduled publishing.
+- Tamil voice-over generation and audio storage.
+- Scene image/video generation, subtitle timing, editing and final rendering.
+- YouTube OAuth, upload, private/public state transitions and scheduled publishing.
 - Cloud backup for local reminders and push notifications.
-- Signed release APK.
+- Signed release APK/AAB.
 
 ## Security rules
 - Never commit API keys, OAuth client secrets, refresh tokens, service-role keys, or passwords.
-- Provider secrets belong in server-side secret storage, never inside the Android bundle.
+- Provider secrets are stored per user in Supabase Vault and retrieved only by the server-side worker; never put them in the Android bundle or GitHub.
 - Use the separate RJ Supabase project only. Do not reuse the NOOR database or credentials.
 - The Android app contains only the Supabase publishable key, which is intended for client use. RLS protects user-owned rows. Never place service-role or provider API keys in the app.
 - YouTube publishing must use the user's own OAuth authorization and configured publishing policy.
