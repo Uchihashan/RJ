@@ -59,34 +59,36 @@ async function callGemini(apiKey: string, prompt: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
   try {
-    const res = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.8, maxOutputTokens: 5000 },
-        }),
-        signal: controller.signal,
-      },
-    );
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({
+        model: "gemini-3.5-flash-lite",
+        input: prompt,
+        store: false,
+      }),
+      signal: controller.signal,
+    });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const detail = body?.error?.message ?? "Gemini request failed";
+      const detail = body?.error?.message ?? body?.message ?? "Gemini request failed";
       throw Object.assign(new Error(String(detail)), { status: res.status });
     }
-    const text = body?.candidates?.[0]?.content?.parts
-      ?.map((part: { text?: string }) => part.text ?? "")
-      .join("\n")
-      .trim();
+    const stepText = Array.isArray(body?.steps)
+      ? body.steps
+          .filter((step: { type?: string }) => step.type === "model_output")
+          .flatMap((step: { content?: { type?: string; text?: string }[] }) => step.content ?? [])
+          .filter((part: { type?: string }) => part.type === "text")
+          .map((part: { text?: string }) => part.text ?? "")
+          .join("\\n")
+      : "";
+    const text = String(body?.output_text ?? stepText).trim();
     if (!text) throw Object.assign(new Error("Gemini returned an empty story"), { status: 502 });
     return text;
   } finally {
     clearTimeout(timer);
   }
 }
-
 async function callOpenRouterFree(apiKey: string, prompt: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
