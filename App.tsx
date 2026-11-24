@@ -37,9 +37,11 @@ function jobStatusLabel(row: any): string {
 }
 type Reminder = { id: string; title: string; time: string; notificationId: string | null };
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false })
-});
+if (Platform.OS !== "web") {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false })
+  });
+}
 
 const RED = "#F3263D";
 const BG = "#080808";
@@ -472,26 +474,28 @@ export default function App() {
       return;
     }
     let notificationId: string | null = null;
-    try {
-      if (Platform.OS === "android") {
-        await Notifications.setNotificationChannelAsync("rj-reminders", {
-          name: "RJ reminders", importance: Notifications.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250], lightColor: RED
-        });
+    if (Platform.OS !== "web") {
+      try {
+        if (Platform.OS === "android") {
+          await Notifications.setNotificationChannelAsync("rj-reminders", {
+            name: "RJ reminders", importance: Notifications.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250], lightColor: RED
+          });
+        }
+        const current = await Notifications.getPermissionsAsync();
+        const permission = current.status === "granted" ? current : await Notifications.requestPermissionsAsync();
+        if (permission.status === "granted") {
+          const [hour, minute] = scheduleTime.split(":").map(Number);
+          const date = new Date();
+          date.setHours(hour, minute, 0, 0);
+          if (date.getTime() <= Date.now()) date.setDate(date.getDate() + 1);
+          notificationId = await Notifications.scheduleNotificationAsync({
+            content: { title: "RJ Reminder", body: title, sound: "default" },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date, channelId: "rj-reminders" }
+          });
+        }
+      } catch {
+        Alert.alert("Notification unavailable", "The reminder will still be saved inside RJ, but Android notification scheduling failed.");
       }
-      const current = await Notifications.getPermissionsAsync();
-      const permission = current.status === "granted" ? current : await Notifications.requestPermissionsAsync();
-      if (permission.status === "granted") {
-        const [hour, minute] = scheduleTime.split(":").map(Number);
-        const date = new Date();
-        date.setHours(hour, minute, 0, 0);
-        if (date.getTime() <= Date.now()) date.setDate(date.getDate() + 1);
-        notificationId = await Notifications.scheduleNotificationAsync({
-          content: { title: "RJ Reminder", body: title, sound: "default" },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date, channelId: "rj-reminders" }
-        });
-      }
-    } catch {
-      Alert.alert("Notification unavailable", "The reminder will still be saved inside RJ, but Android notification scheduling failed.");
     }
     const item: Reminder = { id: String(Date.now()), title, time: scheduleTime, notificationId };
     setReminders(current => [item, ...current]);
@@ -630,7 +634,7 @@ export default function App() {
       <Field label="Task" value={scheduleTitle} onChangeText={setScheduleTitle} placeholder="Example: Prepare today's kids story" />
       <Field label="Time (24-hour)" value={scheduleTime} onChangeText={setScheduleTime} placeholder="18:00" />
       <ActionButton title="Save reminder" onPress={addReminder} />
-      <Text style={styles.note}>RJ schedules local Android notifications. Delivery time can still be affected by Android battery and alarm settings.</Text>
+      <Text style={styles.note}>{Platform.OS === "web" ? "Browser demo: reminders are saved locally for testing; browser notifications are not enabled here." : "RJ schedules local Android notifications. Delivery time can still be affected by Android battery and alarm settings."}</Text>
       <View style={styles.divider} />
       <Text style={styles.sectionTitle}>Saved reminders</Text>
       {reminders.length === 0 ? <Text style={styles.muted}>Nothing scheduled yet.</Text> : reminders.map(r => <Text key={r.id} style={styles.listLine}>• {r.title} • {r.time}</Text>)}
@@ -639,7 +643,7 @@ export default function App() {
 
   const renderSettings = () => (
     <>
-      <View style={styles.panel}>
+      {Platform.OS !== "web" ? <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Security</Text>
         <Text style={styles.muted}>Set a local PIN to protect this app on this device.</Text>
         <Field label="New PIN (4–8 digits)" value={pin} onChangeText={setPin} placeholder="Enter PIN" secureTextEntry />
@@ -654,7 +658,10 @@ export default function App() {
         <ActionButton title={biometricEnabled ? "Turn off biometric unlock" : "Enable biometric unlock"} onPress={toggleBiometric} secondary />
         <Text style={styles.listLine}>Biometric unlock: {biometricEnabled ? "On" : "Off"}</Text>
         {pinConfigured && <ActionButton title="Lock RJ now" onPress={() => setLocked(true)} secondary />}
-      </View>
+      </View> : <View style={styles.panel}>
+        <Text style={styles.sectionTitle}>Device security</Text>
+        <Text style={styles.muted}>PIN, password and biometric settings are tested on the Android Main App. They are intentionally unavailable in this browser-only demo.</Text>
+      </View>}
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>RJ account</Text>
         <Text style={styles.muted}>Signed in as {session?.user?.email ?? "Unknown account"}</Text>
