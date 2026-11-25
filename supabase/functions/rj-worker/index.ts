@@ -124,6 +124,41 @@ async function callOpenRouterFree(apiKey: string, prompt: string): Promise<strin
 }
 
 
+async function callGroqFree(apiKey: string, prompt: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-oss-20b",
+        messages: [
+          { role: "system", content: "You write original, safe, age-appropriate children's stories." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.8,
+        max_tokens: 5000,
+      }),
+      signal: controller.signal,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = body?.error?.message ?? "Groq Free-tier request failed";
+      throw Object.assign(new Error(String(detail)), { status: res.status });
+    }
+    const text = body?.choices?.[0]?.message?.content?.trim();
+    if (!text) throw Object.assign(new Error("Groq returned an empty story"), { status: 502 });
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
 const PIPELINE_STAGES = [
   ["brief", 1, null],
   ["script_storyboard", 2, "text"],
@@ -234,9 +269,12 @@ async function processJob(message: QueueMessage) {
   const prompt = buildPrompt(String(job.input?.topic ?? ""), String(job.input?.language ?? "Tamil"));
   const providers = eligible.map((spec) => ({
     ...spec,
-    run: () => spec.key === "gemini"
-      ? callGemini(credentialMap.get("gemini")!, prompt)
-      : callOpenRouterFree(credentialMap.get("openrouter")!, prompt),
+    run: () => {
+      if (spec.key === "groq_free") return callGroqFree(credentialMap.get("groq")!, prompt);
+      if (spec.key === "gemini") return callGemini(credentialMap.get("gemini")!, prompt);
+      if (spec.key === "openrouter") return callOpenRouterFree(credentialMap.get("openrouter")!, prompt);
+      throw new Error("No adapter is implemented for provider " + spec.key);
+    },
   }));
 
   if (providers.length === 0) {
@@ -270,7 +308,8 @@ async function processJob(message: QueueMessage) {
     }
 
     const hasKeys = credentialMap.size > 0;
-    const paidConsentNeeded = hasKeys && !policy.allowPaidProviders && !credentialMap.has("openrouter");
+    const hasFreeTextProvider = credentialMap.has("openrouter") || credentialMap.has("groq");
+    const paidConsentNeeded = hasKeys && !hasFreeTextProvider;
     const pauseCode = paidConsentNeeded ? "paid_provider_consent_required" : "provider_not_configured";
     const pauseMessage = paidConsentNeeded
       ? "Only account-billed providers are connected. RJ will not use them until paid-provider metering and explicit spending controls are enabled."
