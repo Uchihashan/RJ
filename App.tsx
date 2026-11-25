@@ -4,6 +4,7 @@ import { supabase } from "./src/lib/supabase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -1044,9 +1045,12 @@ export default function App() {
       ) : (
         <>
           <View style={styles.header}>
-            <View>
-              <Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text>
-              <Text style={styles.headerCaption}>YOUR PERSONAL WORKSPACE</Text>
+            <View style={styles.headerBrandRow}>
+              <Image source={require("./assets/rj-logo.jpg")} style={styles.brandLogo} resizeMode="cover" />
+              <View>
+                <Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text>
+                <Text style={styles.headerCaption}>YOUR PERSONAL WORKSPACE</Text>
+              </View>
             </View>
             <View style={styles.liveDot}><View style={styles.dot} /><Text style={styles.liveText}>READY</Text></View>
           </View>
@@ -1077,6 +1081,8 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG },
   lockScreen: { justifyContent: "center", padding: 24 },
   header: { paddingTop: Platform.OS === "android" ? 18 : 54, paddingHorizontal: 22, paddingBottom: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: 1, borderBottomColor: "#242424" },
+  headerBrandRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  brandLogo: { width: 46, height: 46, borderRadius: 12, backgroundColor: "#FFFFFF" },
   brand: { color: "#FFFFFF", fontSize: 30, fontWeight: "900", letterSpacing: 2 },
   headerCaption: { color: MUTED, fontSize: 9, letterSpacing: 2, marginTop: 2 },
   liveDot: { flexDirection: "row", alignItems: "center", backgroundColor: "#1A1A1A", borderRadius: 30, paddingHorizontal: 11, paddingVertical: 7, gap: 7 },
