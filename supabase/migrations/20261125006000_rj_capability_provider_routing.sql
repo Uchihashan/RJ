@@ -57,6 +57,8 @@ insert into public.provider_capability_catalog
 values
   ('openrouter','text','openrouter/free',array['text'],'free_route','available',
    'Uses only OpenRouter free-model routing; model availability and free quotas can change.'),
+  ('groq_free','text','openai/gpt-oss-20b',array['text'],'free_tier','available',
+   'Use only with a Groq Free-tier organization; do not upgrade to Developer/PayGo. Free-tier quotas are enforced by Groq and RJ falls back on 429.'),
   ('gemini','text','gemini-3.5-flash-lite',array['text'],'account_dependent','disabled_by_policy',
    'Adapter intentionally disabled until RJ implements reliable per-request cost measurement and hard spend enforcement.'),
   ('gemini_tts','speech','gemini-3.8-flash-tts',array['audio/wav'],'account_dependent','disabled_by_policy',
