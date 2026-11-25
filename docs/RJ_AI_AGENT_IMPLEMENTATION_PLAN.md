@@ -156,12 +156,14 @@ This status supersedes earlier audit bullets where they conflict.
 - Durable pipeline-stage schema, persisted progress display, and stage status tracking for running, blocked, waiting-retry, succeeded, and failed states.
 - Text-provider health and cooldown routing: quota/transient failures cool down a provider, compatible configured text providers are tried as fallback, and paused jobs can resume after a provider key is connected.
 - When no compatible image/video adapter is connected, the worker explicitly blocks at scene-assets rather than claiming a finished video.
-- Agent permission and action-audit schema.
+- Agent permission and action-audit schema, plus an authenticated `rj-agent-actions` Edge Function for per-user permission listing/updates, server-side allowlist checks, explicit-confirmation gating, and action completion audit.
+- Settings controls for enabling/disabling the currently supported agent tools (video project creation, reminder creation, and app navigation); new permissions default to disabled and each action still requires confirmation.
+- Server audit entries record proposed/confirmed/succeeded/failed/denied outcomes and store only allowlisted, sanitized action arguments.
 - Browser-only private CI artifact workflow; no public web deployment.
 - Reminder validation uses the requested reminder time, not the screen's default time.
 
 ### Still not implemented / not verified
-- The permission and audit tables are schema only; the app/Edge Function does not yet enforce or write every action through them.
+- The permission/audit migration and Edge Function are committed on the feature branch but are not deployed to the hosted Supabase project. The enforcement currently covers the three app actions wired into the assistant (video project creation, reminder creation, and navigation); YouTube/provider-management actions are reserved in the allowlist but are not yet connected to UI execution.
 - Capability-aware adapters and provider selection for image, video, speech, captioning, rendering, storage, and YouTube are not complete.
 - No end-to-end playable video renderer or media asset pipeline exists yet.
 - No YouTube OAuth connection, multi-channel token management, upload, scheduled publishing, or verification flow exists yet.
