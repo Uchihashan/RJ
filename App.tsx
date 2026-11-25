@@ -288,16 +288,16 @@ export default function App() {
     AsyncStorage.multiSet(writes).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
   }, [jobs, reminders, dataLoaded, authReady, session, jobsOwnerId]);
 
-  const createJob = async (requestedTopic?: string, requestedLanguage?: string) => {
+  const createJob = async (requestedTopic?: string, requestedLanguage?: string): Promise<string> => {
     const clean = (requestedTopic ?? topic).trim();
     const projectLanguage = requestedLanguage ?? language;
     if (!clean) {
       Alert.alert("Topic needed", "Enter a video heading or story topic first.");
-      return;
+      return "தலைப்பு இல்லை. Video topic கொடுத்துவிட்டு மீண்டும் முயற்சி செய்யுங்கள்.";
     }
     if (session && jobsOwnerId !== session.user.id) {
       Alert.alert("Projects loading", "Wait a moment for your account projects to finish syncing, then try again.");
-      return;
+      return "Projects இன்னும் sync ஆகிறது. சிறிது நேரம் கழித்து மீண்டும் முயற்சி செய்யுங்கள்.";
     }
     const item: Job = {
       id: String(Date.now()),
@@ -316,13 +316,14 @@ export default function App() {
       if (data?.id) item.id = data.id;
       if (error) {
         Alert.alert("Cloud queue issue", "RJ could not send this project to the cloud worker. Please check your connection and try again.");
-        return;
+        return "Cloud queue-க்கு project அனுப்ப முடியவில்லை. Internet connection சரிபார்த்து மீண்டும் முயற்சி செய்யுங்கள்.";
       }
     }
     setJobs(current => [item, ...current]);
     setTopic("");
     Alert.alert("Added to RJ queue", "Your story request is safely queued. If no AI provider key is configured yet, RJ will pause it without losing the job.");
     setTab("Create");
+    return "Video project RJ queue-ல் சேர்க்கப்பட்டது. இது இன்னும் rendered video அல்ல; முதலில் story generation நடக்கும்.";
   };
 
   const submitAuth = async () => {
@@ -465,16 +466,16 @@ export default function App() {
     }
   };
 
-  const addReminder = async (requestedTitle?: string, requestedTime?: string) => {
+  const addReminder = async (requestedTitle?: string, requestedTime?: string): Promise<string> => {
     const title = (requestedTitle ?? scheduleTitle).trim();
     const reminderTime = requestedTime ?? scheduleTime;
     if (!title) {
       Alert.alert("Reminder needed", "Enter what you want RJ to remind you about.");
-      return;
+      return "Reminder title இல்லை. என்ன நினைவூட்ட வேண்டும் என்று சொல்லுங்கள்.";
     }
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(reminderTime)) {
       Alert.alert("Time not valid", "Use 24-hour format, for example 18:30.");
-      return;
+      return "நேரம் சரியில்லை. 24-hour format-ல் 18:30 போல கொடுங்கள்.";
     }
     let notificationId: string | null = null;
     if (Platform.OS !== "web") {
@@ -504,6 +505,7 @@ export default function App() {
     setReminders(current => [item, ...current]);
     setScheduleTitle("");
     Alert.alert("Reminder saved", notificationId ? "RJ will notify you at the selected time." : "Saved in RJ. Allow notifications in Android settings to receive an alert.");
+    return notificationId ? "Reminder save செய்யப்பட்டது. Android notification schedule-மும் அமைக்கப்பட்டது." : "Reminder RJ-ல் save செய்யப்பட்டது. Notification permission இல்லாததால் alert schedule ஆகவில்லை.";
   };
 
   const savePin = async () => {
@@ -578,7 +580,7 @@ export default function App() {
         <Text style={styles.heroSub}>உங்கள் அடுத்த வேலையைச் சொல்லுங்கள்.</Text>
         <Text style={styles.heroSub}>Tell RJ what you want to get done today.</Text>
       </View>
-      <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={(value) => setTab(value as Tab)} />
+      <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={async (value) => { setTab(value as Tab); return value + " screen திறக்கப்பட்டது."; }} />
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.quickRow}>
