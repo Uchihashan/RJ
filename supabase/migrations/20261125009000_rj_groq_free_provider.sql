@@ -122,6 +122,10 @@ where provider_key = 'groq_free' and capability = 'text' and model_key = 'openai
 insert into public.provider_capability_catalog
   (provider_key, capability, model_key, output_formats, pricing_mode, availability, notes)
 values
+  ('piper_tamil_rasa_female','speech','tinisoft/piper-ta_IN-rasa_female-medium',array['audio/wav'],'free_tier','available',
+   'Local CPU inference using the CC BY 4.0 Piper Tamil Rasa Female model; no hosted speech API or per-request charge.'),
+  ('piper_tamil_hemalatha','speech','Jeyaram-K/piper-tamil-voices/ta_IN-HemaLatha-medium',array['audio/wav'],'free_tier','available',
+   'Local CPU inference using the Apache-2.0 Piper Tamil HemaLatha model; fallback voice, no hosted speech API or per-request charge.'),
   ('cloudflare_flux_schnell','image','@cf/black-forest-labs/flux-1-schnell',array['image/jpeg'],'free_tier','available',
    'Only for Cloudflare Workers Free plan. 10,000 Neurons/day hard-stops at quota; never use Workers Paid or any account that can bill above the free allocation.')
 on conflict (provider_key, capability, model_key) do update set
