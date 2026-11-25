@@ -32,7 +32,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Check Supabase Edge Functions
-        run: deno check supabase/functions/rj-assistant/index.ts supabase/functions/rj-worker/index.ts supabase/functions/rj-agent-actions/index.ts
+        run: deno check supabase/functions/rj-assistant/index.ts supabase/functions/rj-worker/index.ts supabase/functions/rj-agent-actions/index.ts && deno test supabase/functions/_shared/provider-registry.test.ts
       - name: Export browser demo
         run: npx expo export --platform web
       - name: Upload private workflow artifact
