@@ -33,6 +33,9 @@ jobs:
           deno-version: v2.x
       - name: Check Supabase Edge Functions
         run: deno check supabase/functions/rj-assistant/index.ts supabase/functions/rj-worker/index.ts supabase/functions/rj-agent-actions/index.ts && deno test supabase/functions/_shared/provider-registry.test.ts supabase/functions/_shared/gemini-tts.test.ts
+      - name: Test and build FFmpeg renderer worker
+        working-directory: workers/rj-renderer
+        run: npm install --no-audit --no-fund && npm test && npm run build
       - name: Export browser demo
         run: npx expo export --platform web
       - name: Upload private workflow artifact
