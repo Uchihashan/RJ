@@ -4,8 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../lib/supabase";
 
 type Message = { role: "user" | "assistant"; content: string };
-type Pending = { title: string; detail: string; run: () => Promise<void> };
-type Props = { onCreateVideoProject: (topic: string) => Promise<void>; onCreateReminder: (title: string, time: string) => Promise<void>; onNavigate: (tab: string) => void };
+type Pending = { title: string; detail: string; run: () => Promise<string> };
+type Props = { onCreateVideoProject: (topic: string) => Promise<string>; onCreateReminder: (title: string, time: string) => Promise<string>; onNavigate: (tab: string) => Promise<string> };
 const RED = "#F3263D";
 const WELCOME: Message = {
   role: "assistant",
@@ -88,7 +88,7 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
     const nav = content.match(/^(?:open|go to)\s+(create|edit|tools|schedule|settings|home)$/i);
     if (video) { setPending({ title: "Create video project", detail: video[1], run: () => onCreateVideoProject(video[1].trim()) }); setMessages(v => [...v, { role: "assistant", content: "இந்த video project-ஐ queue-ல் சேர்க்கலாமா? Confirm அழுத்தினால் மட்டும் சேர்க்கப்படும்." }]); return; }
     if (reminder) { setPending({ title: "Save reminder", detail: reminder[1] + " at " + reminder[2], run: () => onCreateReminder(reminder[1].trim(), reminder[2]) }); setMessages(v => [...v, { role: "assistant", content: "இந்த reminder-ஐ சேமிக்கலாமா? Confirm அழுத்தினால் மட்டும் சேமிக்கப்படும்." }]); return; }
-    if (nav) { const tab = nav[1][0].toUpperCase() + nav[1].slice(1).toLowerCase(); setPending({ title: "Open " + tab, detail: "RJ " + tab + " screen", run: async () => onNavigate(tab) }); setMessages(v => [...v, { role: "assistant", content: tab + " screen-ஐ திறக்கலாமா?" }]); return; }
+    if (nav) { const tab = nav[1][0].toUpperCase() + nav[1].slice(1).toLowerCase(); setPending({ title: "Open " + tab, detail: "RJ " + tab + " screen", run: () => onNavigate(tab) }); setMessages(v => [...v, { role: "assistant", content: tab + " screen-ஐ திறக்கலாமா?" }]); return; }
     if (!supabase) {
       setError("RJ cloud connection is not configured in this build.");
       return;
@@ -111,7 +111,7 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
   const confirmPending = async () => {
     if (!pending || actionBusy) return;
     setActionBusy(true);
-    try { await pending.run(); setMessages(v => [...v, { role: "assistant", content: "செயல் முடிந்தது." }]); setPending(null); }
+    try { const result = await pending.run(); setMessages(v => [...v, { role: "assistant", content: result }]); setPending(null); }
     catch (e: any) { setError(e?.message ?? "RJ action failed."); }
     finally { setActionBusy(false); }
   };
