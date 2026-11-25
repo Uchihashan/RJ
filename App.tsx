@@ -39,6 +39,7 @@ function jobStatusLabel(row: any): string {
   return row.status;
 }
 type Reminder = { id: string; title: string; time: string; notificationId: string | null };
+type AgentToolKey = "video.create" | "reminder.create" | "navigation.open";
 
 if (Platform.OS !== "web") {
   Notifications.setNotificationHandler({
@@ -131,6 +132,8 @@ export default function App() {
   const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
   const [providerBusy, setProviderBusy] = useState<string | null>(null);
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [agentPermissions, setAgentPermissions] = useState<Record<string, boolean>>({});
+  const [agentPermissionBusy, setAgentPermissionBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -318,6 +321,50 @@ export default function App() {
     else if (!session && jobsOwnerId === "local") writes.push(["rj_video_jobs_local", JSON.stringify(jobs)]);
     AsyncStorage.multiSet(writes).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
   }, [jobs, reminders, dataLoaded, authReady, session, jobsOwnerId]);
+
+  useEffect(() => {
+    if (!session || !supabase) { setAgentPermissions({}); return; }
+    let active = true;
+    supabase.functions.invoke("rj-agent-actions", { body: { action: "list" } }).then(({ data, error }) => {
+      if (!active || error || !Array.isArray(data?.permissions)) return;
+      const next: Record<string, boolean> = {};
+      for (const item of data.permissions) next[item.tool_key] = item.enabled === true;
+      setAgentPermissions(next);
+    });
+    return () => { active = false; };
+  }, [session]);
+
+  const setAgentToolPermission = async (toolKey: AgentToolKey, enabled: boolean) => {
+    if (!supabase || !session || agentPermissionBusy) return;
+    setAgentPermissionBusy(toolKey);
+    try {
+      const { data, error } = await supabase.functions.invoke("rj-agent-actions", {
+        body: { action: "set_permission", tool_key: toolKey, enabled },
+      });
+      if (error || !data?.ok) throw error ?? new Error(data?.error ?? "Permission update failed.");
+      setAgentPermissions(current => ({ ...current, [toolKey]: enabled }));
+      Alert.alert("RJ permission updated", enabled ? "This tool is enabled. RJ will still ask before each action." : "This tool is disabled.");
+    } catch (error: any) {
+      Alert.alert("Permission update failed", error?.message ?? "Could not update RJ permission.");
+    } finally { setAgentPermissionBusy(null); }
+  };
+
+  const beginAgentAction = async (toolKey: AgentToolKey, args: Record<string, string>): Promise<string> => {
+    if (!supabase || !session) throw new Error("Sign in to enable audited RJ actions.");
+    const { data, error } = await supabase.functions.invoke("rj-agent-actions", {
+      body: { action: "begin_action", tool_key: toolKey, arguments: args, confirmed: true },
+    });
+    if (error || !data?.ok || !data?.request_id) throw new Error(data?.error ?? error?.message ?? "RJ permission check failed. No action was run.");
+    return String(data.request_id);
+  };
+
+  const finishAgentAction = async (requestId: string, status: "succeeded" | "failed", summary: string) => {
+    if (!supabase) throw new Error("RJ cloud connection is unavailable for audit completion.");
+    const { data, error } = await supabase.functions.invoke("rj-agent-actions", {
+      body: { action: "finish_action", request_id: requestId, status, result_summary: summary },
+    });
+    if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? "RJ could not complete the action audit.");
+  };
 
   const createJob = async (requestedTopic?: string, requestedLanguage?: string): Promise<string> => {
     const clean = (requestedTopic ?? topic).trim();
@@ -619,7 +666,7 @@ export default function App() {
         <Text style={styles.heroSub}>உங்கள் அடுத்த வேலையைச் சொல்லுங்கள்.</Text>
         <Text style={styles.heroSub}>Tell RJ what you want to get done today.</Text>
       </View>
-      <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={async (value) => { setTab(value as Tab); return value + " screen திறக்கப்பட்டது."; }} />
+      <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={async (value) => { setTab(value as Tab); return value + " screen திறக்கப்பட்டது."; }} onBeginAgentAction={beginAgentAction} onFinishAgentAction={finishAgentAction} />
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.quickRow}>
@@ -716,6 +763,24 @@ export default function App() {
         <Text style={styles.sectionTitle}>Device security</Text>
         <Text style={styles.muted}>PIN, password and biometric settings are tested on the Android Main App. They are intentionally unavailable in this browser-only demo.</Text>
       </View>}
+      <View style={styles.panel}>
+        <Text style={styles.sectionTitle}>AI Agent permissions</Text>
+        <Text style={styles.muted}>ஒவ்வொரு tool-ஐயும் இங்கே enable செய்ய வேண்டும். Enable செய்தாலும் RJ ஒவ்வொரு செயலுக்கும் Confirm கேட்கும்.</Text>
+        {([
+          ["video.create", "Create video project"],
+          ["reminder.create", "Save reminder"],
+          ["navigation.open", "Open app screens"],
+        ] as [AgentToolKey, string][]).map(([key, label]) => (
+          <View key={key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9 }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={styles.listLine}>{label}</Text>
+              <Text style={styles.muted}>{agentPermissions[key] ? "Enabled · confirmation required" : "Disabled"}</Text>
+            </View>
+            <ActionButton title={agentPermissionBusy === key ? "Saving…" : agentPermissions[key] ? "Disable" : "Enable"} onPress={() => setAgentToolPermission(key, !agentPermissions[key])} disabled={agentPermissionBusy !== null} secondary={!agentPermissions[key]} />
+          </View>
+        ))}
+        <Text style={styles.note}>Every confirmed action is checked by the server and written to the audit log. New tools stay disabled until you enable them.</Text>
+      </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>RJ account</Text>
         <Text style={styles.muted}>Signed in as {session?.user?.email ?? "Unknown account"}</Text>
