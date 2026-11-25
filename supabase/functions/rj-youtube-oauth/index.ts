@@ -6,7 +6,6 @@ const SECRET_KEY = SECRET_MAP ? (JSON.parse(SECRET_MAP) as Record<string,string>
 const ADMIN_KEY = SECRET_KEY || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const GOOGLE_CLIENT_ID = Deno.env.get("YOUTUBE_OAUTH_CLIENT_ID") ?? "";
 const GOOGLE_CLIENT_SECRET = Deno.env.get("YOUTUBE_OAUTH_CLIENT_SECRET") ?? "";
-const TOKEN_ENCRYPTION_KEY = Deno.env.get("RJ_YOUTUBE_TOKEN_ENCRYPTION_KEY") ?? "";
 const CALLBACK_URL = SUPABASE_URL + "/functions/v1/rj-youtube-oauth";
 const APP_RETURN_URL = "rj://youtube-connected";
 
@@ -30,16 +29,6 @@ function fromBase64(value: string) {
 async function sha256(value: string) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
 }
-async function encryptRefreshToken(token: string) {
-  const rawKey = fromBase64(TOKEN_ENCRYPTION_KEY);
-  if (rawKey.length !== 32) throw new Error("RJ_YOUTUBE_TOKEN_ENCRYPTION_KEY must be base64 for exactly 32 random bytes");
-  const key = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt"]);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt({ name:"AES-GCM", iv }, key, new TextEncoder().encode(token));
-  return "v1:" + base64(iv) + ":" + base64(new Uint8Array(encrypted));
-}
-function randomToken(bytes = 32) { return base64(crypto.getRandomValues(new Uint8Array(bytes))); }
-
 async function startOAuth(req: Request) {
   const auth = req.headers.get("Authorization") ?? "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
