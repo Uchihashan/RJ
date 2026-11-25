@@ -55,7 +55,7 @@ async function startOAuth(req: Request) {
     return json({ connected:Boolean(channel), channel_title:channel?.channel_title ?? null, channel_handle:channel?.channel_handle ?? null });
   }
   if (input?.action !== "start") return json({ error:"Unsupported YouTube OAuth action." }, 400);
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !TOKEN_ENCRYPTION_KEY) {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return json({ error:"YouTube OAuth is not configured on the server yet." }, 503);
   }
 
@@ -91,7 +91,7 @@ async function finishOAuth(url: URL) {
   const state = url.searchParams.get("state");
   if (error) return Response.redirect(APP_RETURN_URL + "?status=denied", 302);
   if (!code || !state) return Response.redirect(APP_RETURN_URL + "?status=invalid", 302);
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !TOKEN_ENCRYPTION_KEY) {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return Response.redirect(APP_RETURN_URL + "?status=not_configured", 302);
   }
 
@@ -130,21 +130,17 @@ async function finishOAuth(url: URL) {
     console.error("YouTube channel lookup failed", channelResponse.status);
     return Response.redirect(APP_RETURN_URL + "?status=no_channel", 302);
   }
-  const encrypted = await encryptRefreshToken(tokens.refresh_token);
-  const { error: saveError } = await admin.from("youtube_channels").upsert({
-    user_id:consumed.user_id,
-    channel_id:String(channel.id),
-    channel_title:String(channel.snippet?.title ?? "YouTube channel"),
-    channel_handle:channel.snippet?.customUrl ?? null,
-    encrypted_refresh_token:encrypted,
-    token_key_version:1,
-    granted_scopes:String(tokens.scope ?? "").split(" ").filter(Boolean),
-    timezone:"Asia/Colombo",
-    is_active:true,
-    updated_at:new Date().toISOString(),
-  }, { onConflict:"user_id,channel_id" });
+  const { error: saveError } = await admin.rpc("rj_store_youtube_refresh_token", {
+    p_user_id:consumed.user_id,
+    p_channel_id:String(channel.id),
+    p_channel_title:String(channel.snippet?.title ?? "YouTube channel"),
+    p_channel_handle:channel.snippet?.customUrl ?? null,
+    p_refresh_token:tokens.refresh_token,
+    p_scopes:String(tokens.scope ?? "").split(" ").filter(Boolean),
+    p_timezone:"Asia/Colombo",
+  });
   if (saveError) {
-    console.error("YouTube channel save failed", saveError.message);
+    console.error("YouTube channel Vault save failed", saveError.message);
     return Response.redirect(APP_RETURN_URL + "?status=save_failed", 302);
   }
   return Response.redirect(APP_RETURN_URL + "?status=connected", 302);
