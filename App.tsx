@@ -718,7 +718,8 @@ export default function App() {
       Alert.alert("YouTube setup unavailable", error?.message ?? "Could not start YouTube connection.");
     } finally { setYoutubeBusy(false); }
   };
-\n  const renderHome = () => (
+
+  const renderHome = () => (
     <>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>PERSONAL AI WORKSPACE</Text>
@@ -914,7 +915,8 @@ export default function App() {
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Other connections</Text>
-        <Text style={styles.listLine}>YouTube account: <Text style={youtubeConnection === "connected" ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{youtubeConnection === "connected" ? "Connected in this session" : youtubeConnection === "denied" ? "Not connected" : "Not connected"}</Text></Text>\n        <ActionButton title={youtubeBusy ? "Opening Google…" : youtubeConnection === "connected" ? "Connect another YouTube channel" : "Connect YouTube channel"} onPress={connectYoutube} disabled={youtubeBusy || !session} />
+        <Text style={styles.listLine}>YouTube account: <Text style={youtubeConnection === "connected" ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{youtubeConnection === "connected" ? "Connected in this session" : youtubeConnection === "denied" ? "Not connected" : "Not connected"}</Text></Text>
+        <ActionButton title={youtubeBusy ? "Opening Google…" : youtubeConnection === "connected" ? "Connect another YouTube channel" : "Connect YouTube channel"} onPress={connectYoutube} disabled={youtubeBusy || !session} />
         <Text style={styles.listLine}>Cloud sync: <Text style={{ color: "#53C98B", fontWeight: "700" }}>Connected</Text></Text>
         <Text style={styles.note}>YouTube OAuth, multi-channel publishing and scheduling are the remaining major pipeline stages.</Text>
       </View>
