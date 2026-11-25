@@ -1,18 +1,73 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../lib/supabase";
 
 type Message = { role: "user" | "assistant"; content: string };
 const RED = "#F3263D";
+const WELCOME: Message = {
+  role: "assistant",
+  content: "வணக்கம்! நான் RJ. தமிழ், Tanglish அல்லது English-ல் பேசலாம். என்ன வேலை செய்ய வேண்டும்?",
+};
 
 export default function AssistantScreen() {
-  const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: "வணக்கம்! நான் RJ. தமிழ், Tanglish அல்லது English-ல் பேசலாம். என்ன வேலை செய்ய வேண்டும்?" },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [storageKey, setStorageKey] = useState("rj_chat_history_guest");
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const canSend = useMemo(() => !!draft.trim() && !busy, [draft, busy]);
+
+  useEffect(() => {
+    let active = true;
+    const loadForUser = async (userId?: string) => {
+      const nextKey = userId ? "rj_chat_history_" + userId : "rj_chat_history_guest";
+      if (active) {
+        setHistoryLoaded(false);
+        setStorageKey(nextKey);
+        setMessages([WELCOME]);
+        setError("");
+      }
+      try {
+        const saved = await AsyncStorage.getItem(nextKey);
+        const parsed = saved ? JSON.parse(saved) as Message[] : [];
+        if (active) {
+          const valid = Array.isArray(parsed)
+            ? parsed.filter((m) => (m?.role === "user" || m?.role === "assistant") && typeof m?.content === "string").slice(-80)
+            : [];
+          setMessages(valid.length ? valid : [WELCOME]);
+          setHistoryLoaded(true);
+        }
+      } catch {
+        if (active) setHistoryLoaded(true);
+      }
+    };
+
+    supabase?.auth.getSession().then(({ data }) => loadForUser(data.session?.user.id)).catch(() => loadForUser());
+    const { data: authListener } = supabase?.auth.onAuthStateChange((_event, session) => {
+      void loadForUser(session?.user.id);
+    }) ?? { data: { subscription: null } };
+
+    return () => {
+      active = false;
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!historyLoaded) return;
+    AsyncStorage.setItem(storageKey, JSON.stringify(messages.slice(-80))).catch(() => {
+      setError("RJ could not save this chat on your device.");
+    });
+  }, [messages, storageKey, historyLoaded]);
+
+  const clearChat = async () => {
+    if (busy) return;
+    setMessages([WELCOME]);
+    setError("");
+    await AsyncStorage.removeItem(storageKey).catch(() => undefined);
+  };
 
   const send = async () => {
     const content = draft.trim();
@@ -43,9 +98,16 @@ export default function AssistantScreen() {
   return (
     <View style={styles.wrap}>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>RJ CENTRAL BRAIN</Text>
-        <Text style={styles.heading}>Talk to RJ</Text>
-        <Text style={styles.sub}>Tamil • Tanglish • English · Gemini first, OpenRouter fallback</Text>
+        <View style={styles.heroTop}>
+          <View style={styles.heroCopy}>
+            <Text style={styles.eyebrow}>RJ CENTRAL BRAIN</Text>
+            <Text style={styles.heading}>Talk to RJ</Text>
+            <Text style={styles.sub}>Tamil • Tanglish • English · Gemini first, OpenRouter fallback</Text>
+          </View>
+          <Pressable accessibilityRole="button" onPress={clearChat} disabled={busy} style={styles.clearButton}>
+            <Text style={styles.clearText}>CLEAR CHAT</Text>
+          </Pressable>
+        </View>
       </View>
       <ScrollView style={styles.chat} contentContainerStyle={{ paddingBottom: 14 }} keyboardShouldPersistTaps="handled">
         {messages.map((message, index) => (
@@ -55,7 +117,7 @@ export default function AssistantScreen() {
           </View>
         ))}
         {busy ? <View style={styles.loading}><ActivityIndicator color={RED} /><Text style={styles.sub}>RJ is thinking…</Text></View> : null}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       </ScrollView>
       <View style={styles.composer}>
         <TextInput
@@ -71,7 +133,7 @@ export default function AssistantScreen() {
           <Text style={styles.sendText}>{busy ? "..." : "SEND"}</Text>
         </Pressable>
       </View>
-      <Text style={styles.note}>AI answers use your connected provider. RJ will not claim to upload, publish, or edit a rendered video until those tools are actually connected.</Text>
+      <Text style={styles.note}>Chat history is saved separately on this device for each signed-in account. AI answers use your connected provider. RJ will not claim to upload, publish, or edit a rendered video until those tools are connected.</Text>
     </View>
   );
 }
@@ -79,9 +141,13 @@ export default function AssistantScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1, minHeight: 560 },
   hero: { paddingVertical: 12, paddingHorizontal: 4 },
+  heroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  heroCopy: { flex: 1 },
   eyebrow: { color: RED, fontSize: 10, fontWeight: "900", letterSpacing: 2 },
   heading: { color: "#FFF", fontSize: 25, fontWeight: "900", marginTop: 7 },
   sub: { color: "#A3A3A3", fontSize: 12, lineHeight: 18, marginTop: 6 },
+  clearButton: { minHeight: 40, paddingHorizontal: 10, justifyContent: "center", borderWidth: 1, borderColor: "#454545", borderRadius: 9 },
+  clearText: { color: "#DDD", fontSize: 9, fontWeight: "900" },
   chat: { flex: 1, maxHeight: 430, backgroundColor: "#101010", borderRadius: 15, borderWidth: 1, borderColor: "#292929", padding: 10 },
   bubble: { padding: 12, borderRadius: 13, marginBottom: 10, maxWidth: "94%" },
   userBubble: { alignSelf: "flex-end", backgroundColor: "#40121A", borderWidth: 1, borderColor: "#70202D" },
