@@ -5,6 +5,7 @@ import {
   selectEligibleProviders,
   type ProviderHealth,
 } from "../_shared/provider-registry.ts";
+import { agentSystemPrompt, parseAgentOutput, type AgentContext } from "./agent-response.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -32,13 +33,9 @@ const admin = createClient(url, adminKey, {
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
-async function callGemini(apiKey: string, messages: ChatMessage[]) {
+async function callGemini(apiKey: string, messages: ChatMessage[], context: AgentContext) {
   const prompt = [
-    "You are RJ, a helpful personal AI agent inside an Android app.",
-    "Understand and respond naturally in Tamil script, Tanglish, or English. Reply in the user's language.",
-    "Be practical, concise, and honest. You may explain plans and draft actions, but do not claim to have performed external actions.",
-    "Never ask for passwords or one-time codes. Ask for confirmation before any paid, publishing, destructive, or external side-effect action.",
-    "For video requests, help create an editable plan/script; do not claim a rendered video exists.",
+    agentSystemPrompt(context),
     ...messages.slice(-16).map((m) => (m.role === "user" ? "User: " : "RJ: ") + m.content),
     "RJ:",
   ].join("\n\n");
@@ -68,7 +65,7 @@ async function callGemini(apiKey: string, messages: ChatMessage[]) {
   }
 }
 
-async function callGroqFree(apiKey: string, messages: ChatMessage[]) {
+async function callGroqFree(apiKey: string, messages: ChatMessage[], context: AgentContext) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
   try {
@@ -81,7 +78,7 @@ async function callGroqFree(apiKey: string, messages: ChatMessage[]) {
       body: JSON.stringify({
         model: "openai/gpt-oss-20b",
         messages: [
-          { role: "system", content: "You are RJ, a practical personal AI assistant. Reply in the user's language (Tamil, Tanglish, or English). Be honest about actions and ask before paid or external actions." },
+          { role: "system", content: agentSystemPrompt(context) },
           ...messages.slice(-16),
         ],
         temperature: 0.7,
@@ -99,7 +96,7 @@ async function callGroqFree(apiKey: string, messages: ChatMessage[]) {
   }
 }
 
-async function callOpenRouter(apiKey: string, messages: ChatMessage[]) {
+async function callOpenRouter(apiKey: string, messages: ChatMessage[], context: AgentContext) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
