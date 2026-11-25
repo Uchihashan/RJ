@@ -140,6 +140,48 @@ function classifyFailure(provider: string, error: unknown): ProviderFailure {
   };
 }
 
+const PIPELINE_STAGES = [
+  ["brief", 1, null],
+  ["script_storyboard", 2, "text"],
+  ["scene_assets", 3, "image_or_video"],
+  ["voice_audio", 4, "speech"],
+  ["captions", 5, "transcription_or_tts_alignment"],
+  ["timeline_edit", 6, "media_assembly"],
+  ["render_export", 7, "render"],
+  ["quality_check", 8, "media_analysis"],
+  ["metadata_thumbnail", 9, "text_and_image"],
+  ["youtube_upload", 10, "youtube_upload"],
+  ["youtube_schedule_verify", 11, "youtube_schedule"],
+] as const;
+
+async function initializePipelineStages(jobId: string, userId: string) {
+  const rows = PIPELINE_STAGES.map(([stage_key, stage_order, required_capability]) => ({
+    job_id: jobId,
+    user_id: userId,
+    stage_key,
+    stage_order,
+    required_capability,
+    idempotency_key: jobId + ":" + stage_key,
+    status: stage_key === "brief" ? "succeeded" : "pending",
+    ...(stage_key === "brief" ? { started_at: new Date().toISOString(), finished_at: new Date().toISOString() } : {}),
+  }));
+  const { error } = await admin.from("job_stages").upsert(rows, {
+    onConflict: "job_id,stage_key",
+    ignoreDuplicates: true,
+  });
+  if (error) throw error;
+}
+
+async function markPipelineBlocked(jobId: string, stageKey: string, reason: string) {
+  const { error } = await admin.from("job_stages").update({
+    status: "blocked",
+    error_code: "capability_provider_missing",
+    error_message: reason.slice(0, 500),
+    updated_at: new Date().toISOString(),
+  }).eq("job_id", jobId).eq("stage_key", stageKey);
+  if (error) throw error;
+}
+
 async function processJob(message: QueueMessage) {
   const payload = message.message ?? {};
   const jobId = payload.job_id;
@@ -163,6 +205,8 @@ async function processJob(message: QueueMessage) {
     return { job_id: jobId, outcome: "discarded_stale_message" };
   }
 
+  await initializePipelineStages(jobId, userId);
+
   const { data: credentialRows, error: credentialError } = await admin.rpc("rj_get_provider_keys", { p_user_id: userId });
   if (credentialError) throw credentialError;
   const credentialMap = new Map<string, string>(
@@ -177,12 +221,14 @@ async function processJob(message: QueueMessage) {
 
   if (providers.length === 0) {
     const { error: pauseError } = await admin.from("jobs").update({
-      status: "paused",
+      status: "blocked",
+      current_stage: "script_storyboard",
       error_code: "provider_not_configured",
       error_message: "Add a Gemini or OpenRouter API key in RJ Settings. Both are configured for free-tier story generation; limits still apply.",
       updated_at: new Date().toISOString(),
     }).eq("id", jobId).eq("user_id", userId);
     if (pauseError) throw pauseError;
+    await markPipelineBlocked(jobId, "script_storyboard", "Connect a text-generation provider to create the story.");
     const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
     if (archiveError) throw archiveError;
     return { job_id: jobId, outcome: "paused_provider_not_configured" };
@@ -220,7 +266,8 @@ async function processJob(message: QueueMessage) {
     if (attemptUpdateError) throw attemptUpdateError;
 
     const { error: jobUpdateError } = await admin.from("jobs").update({
-      status: "paused",
+      status: "blocked",
+      current_stage: "scene_assets",
       input: { ...job.input, stage: "story_ready" },
       output: {
         stage: "story_ready",
@@ -234,6 +281,17 @@ async function processJob(message: QueueMessage) {
       updated_at: new Date().toISOString(),
     }).eq("id", jobId).eq("user_id", userId);
     if (jobUpdateError) throw jobUpdateError;
+
+    const now = new Date().toISOString();
+    const { error: storyStageError } = await admin.from("job_stages").update({
+      status: "succeeded",
+      selected_provider: provider.name,
+      output: { story_ready: true },
+      finished_at: now,
+      updated_at: now,
+    }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
+    if (storyStageError) throw storyStageError;
+    await markPipelineBlocked(jobId, "scene_assets", "No connected image/video generation adapter is configured yet. The story is saved; this project is waiting for the next pipeline capability.");
 
     const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
     if (archiveError) throw archiveError;
