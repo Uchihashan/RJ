@@ -1,4 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  classifyProviderFailure,
+  cooldownUntil,
+  selectEligibleProviders,
+  type ProviderHealth,
+} from "../_shared/provider-registry.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -115,21 +121,87 @@ Deno.serve(async (req: Request) => {
     return json({ error: "RJ could not load your connected AI provider. Check Settings." }, 503);
   }
   const keys = new Map<string, string>((rows ?? []).map((r: { provider: string; api_key: string }) => [r.provider, r.api_key]));
-  const failures: string[] = [];
-  const gemini = keys.get("gemini");
-  const openrouter = keys.get("openrouter");
+  const { data: policyRow, error: policyError } = await admin.from("provider_user_policies")
+    .select("allow_paid_providers,monthly_budget_usd")
+    .eq("user_id", authData.user.id)
+    .maybeSingle();
+  if (policyError) {
+    console.error("RJ provider policy lookup failed", policyError.message);
+    return json({ error: "RJ could not load your provider spending settings." }, 503);
+  }
+  const policy = {
+    allowPaidProviders: policyRow?.allow_paid_providers === true,
+    monthlyBudgetUsd: Number(policyRow?.monthly_budget_usd ?? 0),
+  };
+  const keys = new Map<string, string>((rows ?? []).map((r: { provider: string; api_key: string }) => [r.provider, r.api_key]));
+  const { data: healthRows, error: healthError } = await admin.from("provider_health")
+    .select("provider_key,state,cooldown_until")
+    .eq("user_id", authData.user.id)
+    .eq("capability", "text");
+  if (healthError) return json({ error: "RJ could not load provider availability." }, 503);
+  const providers = selectEligibleProviders("text", keys, (healthRows ?? []) as ProviderHealth[], policy);
+  if (!providers.length) {
+    const paidConsentNeeded = keys.has("gemini") && !policy.allowPaidProviders && !keys.has("openrouter");
+    return json({
+      error: paidConsentNeeded
+        ? "Gemini may be billable on your account. Enable paid providers and set a monthly budget in RJ Settings, or connect OpenRouter's free router."
+        : "AI provider not connected or currently cooling down. Connect a free text provider in RJ Settings.",
+      code: paidConsentNeeded ? "paid_provider_consent_required" : "provider_unavailable",
+    }, paidConsentNeeded ? 402 : 424);
+  }
 
-  if (gemini) {
-    try { return json({ reply: await callGemini(gemini, clean), provider: "Gemini" }); }
-    catch (error) { failures.push("Gemini: " + (error instanceof Error ? error.message : "request failed")); }
-  }
-  if (openrouter) {
-    try { return json({ reply: await callOpenRouter(openrouter, clean), provider: "OpenRouter" }); }
-    catch (error) { failures.push("OpenRouter: " + (error instanceof Error ? error.message : "request failed")); }
-  }
-  if (!gemini && !openrouter) {
-    return json({ error: "AI provider not connected. Open Tools → Settings and connect Gemini or OpenRouter first." }, 424);
+  const failures: string[] = [];
+  for (const provider of providers) {
+    const { data: attempt, error: attemptError } = await admin.from("provider_attempts").insert({
+      user_id: authData.user.id,
+      capability: "text",
+      provider_key: provider.key,
+      model_key: provider.model,
+      attempt_number: failures.length + 1,
+      status: "started",
+      stage_key: "assistant_chat",
+    }).select("id").single();
+    if (attemptError) return json({ error: "RJ could not record provider attempt." }, 503);
+
+    try {
+      const reply = provider.key === "gemini"
+        ? await callGemini(keys.get("gemini")!, clean)
+        : await callOpenRouter(keys.get("openrouter")!, clean);
+      const now = new Date().toISOString();
+      await admin.from("provider_health").upsert({
+        user_id: authData.user.id, provider_key: provider.key, capability: "text",
+        state: "available", cooldown_until: null, last_http_status: 200,
+        last_error_code: null, updated_at: now,
+      }, { onConflict: "user_id,provider_key,capability" });
+      await admin.from("provider_attempts").update({
+        status: "succeeded", http_status: 200, finished_at: now,
+      }).eq("id", attempt.id);
+      return json({ reply, provider: provider.label });
+    } catch (error) {
+      const failure = classifyProviderFailure(error);
+      failures.push(provider.label + ": " + failure.message);
+      const cooldown = cooldownUntil(failure, failures.length);
+      const now = new Date().toISOString();
+      await admin.from("provider_health").upsert({
+        user_id: authData.user.id,
+        provider_key: provider.key,
+        capability: "text",
+        state: cooldown ? "cooldown" : "needs_attention",
+        cooldown_until: cooldown,
+        last_http_status: failure.status,
+        last_error_code: failure.code,
+        updated_at: now,
+      }, { onConflict: "user_id,provider_key,capability" });
+      await admin.from("provider_attempts").update({
+        status: failure.quota ? "quota_exhausted" : failure.status === 429 ? "rate_limited" : failure.retryable ? "failed" : "needs_attention",
+        http_status: failure.status,
+        error_code: failure.code,
+        safe_error_message: failure.message,
+        finished_at: now,
+      }).eq("id", attempt.id);
+      if (!failure.retryable) continue;
+    }
   }
   console.error("RJ AI providers failed", failures);
-  return json({ error: failures.join(" | ").slice(0, 700) || "All connected AI providers are unavailable." }, 502);
+  return json({ error: failures.join(" | ").slice(0, 700) || "All compatible connected providers are unavailable." }, 502);
 });
