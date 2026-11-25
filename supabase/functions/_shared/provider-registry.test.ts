@@ -102,6 +102,16 @@ Deno.test("speech adapter remains disabled until spend enforcement exists", () =
   }
 });
 
+Deno.test("Cloudflare free image provider is eligible only when its credential is connected", () => {
+  const selected = selectEligibleProviders("image", new Map([["cloudflare", "account:token"]]), [], {
+    allowPaidProviders: false,
+    monthlyBudgetUsd: 0,
+  });
+  if (selected.length !== 1 || selected[0].key !== "cloudflare_flux_schnell") {
+    throw new Error("Cloudflare Workers AI Free should be the only enabled hosted image provider");
+  }
+});
+
 Deno.test("paid image and video generation stay disabled even when a budget is present", () => {
   const keys = new Map([["gemini", "secret"]]);
   const policy = { allowPaidProviders: true, monthlyBudgetUsd: 100 };
