@@ -37,7 +37,7 @@ create table if not exists public.provider_capability_catalog (
     'free_route','free_tier','account_dependent','paid'
   ])),
   availability text not null default 'available' check (availability = any (array[
-    'available','preview','region_limited','not_integrated'
+    'available','preview','region_limited','not_integrated','disabled_by_policy'
   ])),
   notes text not null default '',
   updated_at timestamptz not null default now(),
@@ -56,8 +56,8 @@ insert into public.provider_capability_catalog
 values
   ('openrouter','text','openrouter/free',array['text'],'free_route','available',
    'Uses only OpenRouter free-model routing; model availability and free quotas can change.'),
-  ('gemini','text','gemini-3.5-flash-lite',array['text'],'account_dependent','available',
-   'Account billing tier may make usage billable; RJ requires explicit paid-provider consent and a positive monthly budget before using it.')
+  ('gemini','text','gemini-3.5-flash-lite',array['text'],'account_dependent','disabled_by_policy',
+   'Adapter intentionally disabled until RJ implements reliable per-request cost measurement and hard spend enforcement.')
 on conflict (provider_key, capability, model_key) do update set
   output_formats = excluded.output_formats,
   pricing_mode = excluded.pricing_mode,
