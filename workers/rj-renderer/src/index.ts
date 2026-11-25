@@ -454,19 +454,6 @@ async function uploadAsset(
 }
 
 
-async function decryptYoutubeRefreshToken(value: string): Promise<string> {
-  const parts = value.split(":");
-  if (parts.length !== 3 || parts[0] !== "v1") throw new Error("Unsupported encrypted YouTube token format");
-  const keyText = process.env.RJ_YOUTUBE_TOKEN_ENCRYPTION_KEY ?? "";
-  const keyBytes = Buffer.from(keyText, "base64");
-  if (keyBytes.length !== 32) throw new Error("YouTube token encryption key is not configured");
-  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["decrypt"]);
-  const iv = Buffer.from(parts[1]!.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-  const cipher = Buffer.from(parts[2]!.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
-  return new TextDecoder().decode(plain);
-}
-
 async function refreshYoutubeAccessToken(refreshToken: string): Promise<string> {
   const clientId = process.env.YOUTUBE_OAUTH_CLIENT_ID ?? "";
   const clientSecret = process.env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "";
@@ -597,7 +584,8 @@ async function processYoutubeUpload(db: SupabaseClient, stage: StageRow): Promis
     }
     reserved = true;
 
-    const refreshToken = await decryptYoutubeRefreshToken(channel.encrypted_refresh_token);
+    const { data: refreshToken, error: tokenError } = await db.rpc("rj_get_youtube_refresh_token", { p_channel_ref: channelRef });
+    if (tokenError || typeof refreshToken !== "string" || !refreshToken) throw new Error("RJ could not load the YouTube refresh token from Supabase Vault");
     const accessToken = await refreshYoutubeAccessToken(refreshToken);
     const { data: videoBlob, error: downloadError } = await db.storage.from(BUCKET).download(String(render.video_path));
     if (downloadError || !videoBlob) throw new Error("RJ could not read the rendered video from private storage");
