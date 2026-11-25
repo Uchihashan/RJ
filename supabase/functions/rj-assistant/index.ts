@@ -108,7 +108,7 @@ async function callOpenRouter(apiKey: string, messages: ChatMessage[], context: 
     body: JSON.stringify({
       model: "openrouter/free",
       messages: [
-        { role: "system", content: "You are RJ, a practical personal AI assistant. Reply in the user's language (Tamil, Tanglish, or English). Be honest about actions and ask before paid or external actions." },
+        { role: "system", content: agentSystemPrompt(context) },
         ...messages.slice(-16),
       ],
       temperature: 0.7,
