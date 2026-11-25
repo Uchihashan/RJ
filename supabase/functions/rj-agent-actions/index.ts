@@ -25,6 +25,29 @@ function json(body: unknown, status = 200) {
     status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
 }
+async function dispatchFreeRenderer(jobId: string): Promise<void> {
+  const token = Deno.env.get("GITHUB_RENDER_TOKEN") ?? "";
+  if (!token) {
+    console.warn(JSON.stringify({ event: "free_renderer_dispatch_skipped", job_id: jobId, reason: "GITHUB_RENDER_TOKEN_not_configured" }));
+    return;
+  }
+  try {
+    const result = await fetch("https://api.github.com/repos/Uchihashan/RJ/actions/workflows/browser-demo.yml/dispatches", {
+      method: "POST",
+      headers: { "Accept": "application/vnd.github+json", "Authorization": "Bearer " + token, "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+      body: JSON.stringify({ ref: "feature/rj-ai-brain-completion" }),
+    });
+    if (!result.ok) {
+      const detail = await result.text().catch(() => "");
+      console.error(JSON.stringify({ event: "free_renderer_dispatch_failed", job_id: jobId, status: result.status, detail: detail.slice(0, 300) }));
+      return;
+    }
+    console.log(JSON.stringify({ event: "free_renderer_dispatched", job_id: jobId }));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "free_renderer_dispatch_error", job_id: jobId, error: error instanceof Error ? error.message.slice(0, 250) : "dispatch failed" }));
+  }
+}
+
 function safeArguments(tool: ToolKey, value: unknown): Record<string, unknown> {
   const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
   if (tool === "video.create") return { topic: String(input.topic ?? "").trim().slice(0, 180) };
@@ -145,6 +168,7 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString(),
       }).eq("job_id", String(args.job_id)).eq("user_id", user.id).eq("stage_key", "youtube_upload");
       if (stageError) return json({ error: "Approval was recorded, but RJ could not queue the upload stage." }, 500);
+      await dispatchFreeRenderer(String(args.job_id));
     }
     return json({ ok: true, request_id: requestId, tool_key: tool });
   }
