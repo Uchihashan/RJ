@@ -22,7 +22,7 @@ import AssistantScreen from "./src/components/AssistantScreen";
 import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
 type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
-type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; sceneAssetCount?: number; hasNarration?: boolean };
+type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; sceneAssetCount?: number; hasNarration?: boolean; youtubeVideoId?: string };
 type PipelineStage = { job_id: string; stage_key: string; stage_order: number; status: string; selected_provider?: string | null; error_message?: string | null };
 const PIPELINE_STAGE_LABELS: Record<string, string> = { brief: "Brief", script_storyboard: "Story & script", scene_assets: "Visual scenes", voice_audio: "Voice-over", captions: "Captions", timeline_edit: "Timeline edit", render_export: "Render video", quality_check: "Quality check", metadata_thumbnail: "Title & thumbnail", youtube_upload: "YouTube upload", youtube_schedule_verify: "Schedule verification" };
 
@@ -46,7 +46,7 @@ function jobStatusLabel(row: any): string {
   return row.status;
 }
 type Reminder = { id: string; title: string; time: string; notificationId: string | null };
-type AgentToolKey = "video.create" | "reminder.create" | "navigation.open";
+type AgentToolKey = "video.create" | "reminder.create" | "navigation.open" | "youtube.upload";
 
 if (Platform.OS !== "web") {
   Notifications.setNotificationHandler({
@@ -225,7 +225,8 @@ export default function App() {
         renderMode: typeof row.output?.render?.visual_mode === "string" ? row.output.render.visual_mode : undefined,
         generatedImageCount: typeof row.output?.render?.generated_image_count === "number" ? row.output.render.generated_image_count : undefined,
         sceneAssetCount: typeof row.output?.render?.scene_asset_count === "number" ? row.output.render.scene_asset_count : undefined,
-        hasNarration: row.output?.render?.audio === true
+        hasNarration: row.output?.render?.audio === true,
+        youtubeVideoId: typeof row.output?.render?.youtube_video_id === "string" ? row.output.render.youtube_video_id : undefined
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
       if (active) {
@@ -390,6 +391,25 @@ export default function App() {
       body: { action: "finish_action", request_id: requestId, status, result_summary: summary },
     });
     if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? "RJ could not complete the action audit.");
+  };
+
+
+  const approveYoutubeUpload = (job: Job) => {
+    Alert.alert(
+      "Approve YouTube upload?",
+      "RJ will upload this rendered kids video to your connected YouTube channel as PRIVATE. It will not be public. This uses one daily upload slot.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Approve & upload privately", onPress: async () => {
+          try {
+            await beginAgentAction("youtube.upload", { job_id: job.id });
+            Alert.alert("Upload queued", "RJ received your approval. The background worker will upload this video privately.");
+          } catch (error: any) {
+            Alert.alert("Upload not started", error?.message ?? "Enable YouTube upload permission and connect a channel first.");
+          }
+        } }
+      ]
+    );
   };
 
   const createJob = async (requestedTopic?: string, requestedLanguage?: string): Promise<string> => {
@@ -748,6 +768,13 @@ export default function App() {
               <Text style={styles.muted}>
                 {job.renderDuration ? Math.round(job.renderDuration) + " sec" : "Rendered"} • {job.generatedImageCount ? job.generatedImageCount + " AI images" : "Local scene artwork"} • {job.sceneAssetCount ? job.sceneAssetCount + " saved scene images" : "No saved scene assets"} • Ken Burns motion • {job.hasNarration ? "Tamil narration" : "No narration"}
               </Text>
+              {job.youtubeVideoId ? (
+                <Pressable onPress={() => Linking.openURL("https://www.youtube.com/watch?v=" + job.youtubeVideoId)}>
+                  <Text style={{ color: "#53C98B", marginTop: 8, fontWeight: "700" }}>Uploaded privately — open YouTube video</Text>
+                </Pressable>
+              ) : session ? (
+                <ActionButton title="Approve & upload privately to YouTube" onPress={() => approveYoutubeUpload(job)} secondary />
+              ) : null}
               <Pressable onPress={async () => {
                 if (!supabase) return;
                 const { data, error } = await supabase.storage.from("rj-renders").createSignedUrl(job.renderPath!, 3600);
