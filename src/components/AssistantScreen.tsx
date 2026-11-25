@@ -5,15 +5,16 @@ import { supabase } from "../lib/supabase";
 
 type Message = { role: "user" | "assistant"; content: string };
 type Pending = { title: string; detail: string; tool: ToolKey; arguments: Record<string, string>; run: () => Promise<string> };
-type ToolKey = "video.create" | "reminder.create" | "navigation.open";
-type Props = { onCreateVideoProject: (topic: string) => Promise<string>; onCreateReminder: (title: string, time: string) => Promise<string>; onNavigate: (tab: string) => Promise<string>; onBeginAgentAction: (tool: ToolKey, args: Record<string, string>) => Promise<string>; onFinishAgentAction: (requestId: string, status: "succeeded" | "failed", summary: string) => Promise<void> };
+type ToolKey = "video.create" | "reminder.create" | "navigation.open" | "youtube.upload";
+type ProjectOption = { id: string; topic: string; renderPath?: string; youtubeVideoId?: string };
+type Props = { projects: ProjectOption[]; onUploadYoutube: (jobId: string) => Promise<string>; onCreateVideoProject: (topic: string) => Promise<string>; onCreateReminder: (title: string, time: string) => Promise<string>; onNavigate: (tab: string) => Promise<string>; onBeginAgentAction: (tool: ToolKey, args: Record<string, string>) => Promise<string>; onFinishAgentAction: (requestId: string, status: "succeeded" | "failed", summary: string) => Promise<void> };
 const RED = "#F3263D";
 const WELCOME: Message = {
   role: "assistant",
   content: "வணக்கம்! நான் RJ. தமிழ், Tanglish அல்லது English-ல் பேசலாம். என்ன வேலை செய்ய வேண்டும்?",
 };
 
-export default function AssistantScreen({ onCreateVideoProject, onCreateReminder, onNavigate, onBeginAgentAction, onFinishAgentAction }: Props) {
+export default function AssistantScreen({ projects, onUploadYoutube, onCreateVideoProject, onCreateReminder, onNavigate, onBeginAgentAction, onFinishAgentAction }: Props) {
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -97,11 +98,30 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
     setBusy(true);
     try {
       const { data, error: invokeError } = await supabase.functions.invoke("rj-assistant", {
-        body: { messages: next.slice(-16) },
+        body: { messages: next.slice(-16), context: { rendered_projects: projects.slice(0, 10).map(project => ({ id: project.id, topic: project.topic })) } },
       });
       if (invokeError) throw invokeError;
       if (!data?.reply) throw new Error(data?.error ?? "RJ did not return a reply.");
+      const proposed = data.action && typeof data.action === "object" ? data.action : null;
+      const tool = typeof proposed?.tool === "string" ? proposed.tool : "";
+      const args = proposed?.arguments && typeof proposed.arguments === "object" ? proposed.arguments : {};
+      let prepared: Pending | null = null;
+      if (tool === "video.create" && typeof args.topic === "string" && args.topic.trim()) {
+        const topic = args.topic.trim().slice(0, 180);
+        prepared = { title: "Create video project", detail: topic, tool, arguments: { topic }, run: () => onCreateVideoProject(topic) };
+      } else if (tool === "reminder.create" && typeof args.title === "string" && typeof args.time === "string" && /^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(args.time)) {
+        const title = args.title.trim().slice(0, 120);
+        const time = args.time;
+        if (title) prepared = { title: "Save reminder", detail: title + " at " + time, tool, arguments: { title, time }, run: () => onCreateReminder(title, time) };
+      } else if (tool === "navigation.open" && typeof args.tab === "string" && ["Home", "Create", "Edit", "Tools", "Schedule", "Settings"].includes(args.tab)) {
+        const tab = args.tab;
+        prepared = { title: "Open " + tab, detail: "RJ " + tab + " screen", tool, arguments: { tab }, run: () => onNavigate(tab) };
+      } else if (tool === "youtube.upload" && typeof args.job_id === "string") {
+        const project = projects.find(item => item.id === args.job_id && !!item.renderPath && !item.youtubeVideoId);
+        if (project) prepared = { title: "Upload video privately to YouTube", detail: project.topic, tool, arguments: { job_id: project.id }, run: () => onUploadYoutube(project.id) };
+      }
       setMessages(current => [...current, { role: "assistant", content: String(data.reply) }]);
+      if (prepared) setPending(prepared);
     } catch (e: any) {
       setError(e?.message ?? "RJ AI could not connect. Check your internet and provider settings.");
     } finally {
