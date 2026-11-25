@@ -1,26 +1,32 @@
-# RJ FFmpeg Renderer Worker
+# RJ Kids Video Renderer Worker
 
-This isolated Docker worker converts a saved RJ story into a playable 1280x720 H.264 MP4 storyboard, a thumbnail, and an SRT captions sidecar.
+This isolated Docker worker turns an approved RJ story into a complete MP4 preview and preserves the scene source assets for later per-scene editing.
 
-## Current output scope
+## Current automatic pipeline
 
-- Generates text-led vector scene cards from the saved story. These are not AI-generated images.
-- Renders the cards into an MP4 with FFmpeg.
-- Generates scene-timed SRT captions. Captions are not aligned to speech.
-- No narration/audio is added while the speech provider remains disabled.
-- Does not upload to YouTube or schedule publishing.
-- Uses a private Supabase Storage bucket and stores object paths in the job output.
-- Uses the durable `rj_claim_job_stage` lease RPC to avoid concurrent processing.
+- Reads the saved story and splits it into up to 12 scenes.
+- Generates child-safe storybook images with Cloudflare FLUX.1 schnell when the user has connected a Cloudflare Workers **Free** account and its free quota is available.
+- If image generation is unavailable or the free quota is exhausted, creates local vector scene artwork. It never switches to a paid image provider.
+- Keeps a clean source image for every scene in the private `rj-renders` bucket at `<user>/<job>/scenes/scene-NN.jpg`.
+- Builds a versioned timeline manifest in `jobs.output.render.timeline`, including scene number, title, narration text, image path, duration, image source, and motion preset. This is the foundation for scene-by-scene re-editing.
+- Adds a slow FFmpeg Ken Burns zoom to each still-image sequence, then assembles the result as H.264 MP4.
+- Generates Tamil narration locally with Piper when the Tamil voice models are available.
+- Creates an SRT captions sidecar and a thumbnail.
+- Saves the final MP4 and all editable source assets in private Supabase Storage.
 
-The renderer deliberately makes no paid image, video, or speech API calls.
+## Important capability boundary
+
+The Ken Burns effect animates still images with camera movement; it is **not** generative image-to-video AI. No free generative video provider is currently connected in RJ. The provider registry keeps paid video generation disabled. The finished MP4 can be previewed, and the saved scene images plus timeline manifest make later per-scene replacement/re-render possible. A full interactive timeline UI and YouTube OAuth upload flow are separate integration tasks and are not claimed as complete by this worker.
+
+The worker deliberately does not publish to YouTube. Upload remains blocked until a YouTube channel is securely connected and the user confirms publishing.
 
 ## Required environment
 
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` — server-only key; never put this in the Android app
 - Optional `RJ_RENDER_BUCKET` (defaults to `rj-renders`)
-- Optional `RJ_RENDER_POLL_MS` (defaults to 15000)
-- Optional `RJ_RENDER_BATCH_SIZE` (defaults to 2)
+- Optional `RJ_RENDER_POLL_MS` (defaults to `15000`)
+- Optional `RJ_RENDER_BATCH_SIZE` (defaults to `2`)
 
 ## Build and run
 
@@ -34,17 +40,12 @@ docker run --rm \
   rj-renderer
 ```
 
-The worker requires the branch-only Supabase migrations, including the durable stage lease function and private storage bucket. Do not run it against production until those migrations are reviewed and explicitly deployed.
-
 ## Render deployment
 
-Create a Render Background Worker using this Dockerfile and the `workers/rj-renderer` directory as its Docker context. Choose a Singapore region when available for Sri Lanka latency. A continuously running Render worker requires a paid compute plan; do not approve or create the service until the user has reviewed its current price.
+Create a Render Background Worker using this Dockerfile and the `workers/rj-renderer` directory as its Docker context. A continuously running Render worker requires a paid compute plan. Do not create or deploy that service until the user has reviewed and approved its current price.
 
-The worker handles SIGTERM/SIGINT by stopping new polls and finishing the current render before exit. No Render service has been created or deployed by this code change.
+## Free/local media components
 
-## Free Tamil narration and image generation
-
-- Tamil narration is generated locally inside the renderer with Piper ONNX; it does not call a paid speech API. The primary voice is tinisoft's Rasa Female (CC BY 4.0) and the fallback is Jeyaram-K's HemaLatha (Apache-2.0). Rasa attribution: Praveen Srinivasa Varadhan, Ashwin Sankar, Giri Raju and Mitesh M. Khapra, “Rasa: Building Expressive Speech Synthesis Systems for Low-resource Settings,” Interspeech 2024; model: https://huggingface.co/tinisoft/piper-ta_IN-rasa_female-medium. HemaLatha model: https://huggingface.co/Jeyaram-K/piper-tamil-voices. Model attribution and licenses are preserved here.
-- The Cloudflare FLUX.1 schnell image adapter is optional and is only for accounts on the **Workers Free** plan. The 10,000 Neurons/day allowance hard-stops at quota on that plan. Do not configure a Workers Paid account: usage above the allowance can be billed.
-- If the Cloudflare image quota is exhausted, the renderer stops calling Cloudflare for that job and uses locally generated vector scene cards. No paid image fallback is ever used.
-- The renderer includes the model weights in its Docker image; downloading/building this image is free of model licensing fees but the machine hosting the renderer may still have infrastructure charges. Do not deploy it to a paid host without explicit approval.
+- Tamil narration uses Piper ONNX locally: Rasa Female (CC BY 4.0) with HemaLatha (Apache-2.0) fallback. Model attribution and licenses are preserved here: https://huggingface.co/tinisoft/piper-ta_IN-rasa_female-medium and https://huggingface.co/Jeyaram-K/piper-tamil-voices.
+- Cloudflare FLUX.1 schnell is optional and must only be used with a Cloudflare Workers Free account. Its daily allowance hard-stops at quota; RJ records quota failures and uses local vector fallback.
+- FFmpeg, FFprobe, and Sharp are open-source/local media tools. The compute host and private storage may still incur infrastructure charges.
