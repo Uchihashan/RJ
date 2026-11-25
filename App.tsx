@@ -322,12 +322,13 @@ export default function App() {
       Alert.alert("Projects loading", "Wait a moment for your account projects to finish syncing, then try again.");
       return "Projects இன்னும் sync ஆகிறது. சிறிது நேரம் கழித்து மீண்டும் முயற்சி செய்யுங்கள்.";
     }
+    const cloudQueueAvailable = !!(session && supabase);
     const item: Job = {
       id: String(Date.now()),
       topic: clean,
       language: projectLanguage,
       createdAt: new Date().toLocaleString(),
-      status: "Queued — RJ worker will check providers"
+      status: cloudQueueAvailable ? "Queued — RJ worker will check providers" : "Saved on this phone — sign in to send to RJ worker"
     };
     if (session && supabase) {
       const { data, error } = await supabase.from("jobs").insert({
@@ -344,9 +345,14 @@ export default function App() {
     }
     setJobs(current => [item, ...current]);
     setTopic("");
-    Alert.alert("Added to RJ queue", "Your story request is safely queued. If no AI provider key is configured yet, RJ will pause it without losing the job.");
+    if (cloudQueueAvailable) {
+      Alert.alert("Added to RJ queue", "Your story request is safely queued. If no AI provider key is configured yet, RJ will pause it without losing the job.");
+      setTab("Create");
+      return "Video project RJ cloud queue-ல் சேர்க்கப்பட்டது. இது இன்னும் rendered video அல்ல; முதலில் story generation நடக்கும்.";
+    }
+    Alert.alert("Saved on this phone", "This is a local draft only. Sign in to RJ to send it to the cloud worker.");
     setTab("Create");
-    return "Video project RJ queue-ல் சேர்க்கப்பட்டது. இது இன்னும் rendered video அல்ல; முதலில் story generation நடக்கும்.";
+    return "Video project இந்த phone-ல் local draft ஆக save செய்யப்பட்டது. Cloud worker-க்கு அனுப்ப sign in செய்ய வேண்டும்.";
   };
 
   const submitAuth = async () => {
