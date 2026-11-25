@@ -271,3 +271,30 @@ Official provider references:
 - FFmpeg concatenation reference: https://www.ffmpeg.org/faq.html
 
 No Render service, hosted Supabase migration, Edge Function, production deployment, main-branch merge, or APK build was performed.
+
+
+## Free-only image and Tamil narration update — 2026-11-25
+
+Implemented on `feature/rj-full-integration` (branch-only; not deployed):
+
+- Added Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell` as the optional image provider. RJ stores the Account ID and scoped API token together in Supabase Vault; the app requires an explicit confirmation that the account is on Cloudflare Workers **Free**, not Workers Paid.
+- Cloudflare Workers Free has a 10,000 Neurons/day free allocation and rejects further requests after the allocation is exhausted. A 3036 daily-quota response is recorded in `provider_attempts`; RJ stops image calls for that user until the next UTC daily reset. A normal 429 rate limit uses a 30-minute cooldown.
+- If Cloudflare is not configured, unavailable, or quota-limited, remaining scenes use local vector artwork. No paid image provider is used. There is currently one hosted free image provider; local vector artwork is the zero-cost fallback, not another AI image model.
+- Added two local Piper Tamil speech models to the renderer: tinisoft Rasa Female (CC BY 4.0) primary and Jeyaram-K HemaLatha (Apache-2.0) fallback. The Docker build downloads both model weights and runs a Tamil synthesis smoke test.
+- Tamil narration is synthesized locally per scene; FFmpeg muxes it into the MP4 and uses per-scene audio durations for SRT timing. If both local voices fail or the story is not Tamil, the video remains silent rather than calling a paid TTS API.
+- Registered both Piper models as free speech providers and added provider-routing tests for the primary/fallback order.
+- Added Cloudflare image overlay SVG and tests for speech-duration-based SRT timing.
+- Renderer records the selected image mode, image count, local voice model, narration path, and audio state in stage/job output.
+
+Provider references:
+- Cloudflare FLUX.1 schnell API: https://developers.cloudflare.com/workers-ai/models/flux-1-schnell/
+- Cloudflare Workers AI free allocation and hard-stop behavior: https://developers.cloudflare.com/workers-ai/platform/pricing/
+- Cloudflare daily quota error 3036: https://developers.cloudflare.com/workers-ai/platform/errors/
+- Piper Tamil Rasa Female (CC BY 4.0): https://huggingface.co/tinisoft/piper-ta_IN-rasa_female-medium
+- Piper Tamil HemaLatha (Apache-2.0): https://huggingface.co/Jeyaram-K/piper-tamil-voices
+
+Verification boundary:
+- The renderer's TypeScript/unit tests and Docker build have passed on the preceding commit; the latest provider-catalog/cooldown/doc update CI run is still in progress.
+- Cloudflare credentials are not configured; no Cloudflare inference call was made.
+- No hosted Supabase migration/function deployment, Render service deployment, production deployment, main merge, or APK build was performed.
+- The worker source is ready for free-only media processing, but the actual cloud worker still requires a host. Do not deploy it to a paid service without explicit approval; free hosting may not provide a persistent background worker.
