@@ -26,6 +26,9 @@
     "extra": {
       "supabaseUrl": "https://vxtklbtenozsluhseigp.supabase.co",
       "supabasePublishableKey": "sb_publishable__GsLgqQN2NRD09FxKLFmGA_PD_CTJ3j"
+    },
+    "web": {
+      "bundler": "metro"
     }
   }
 }

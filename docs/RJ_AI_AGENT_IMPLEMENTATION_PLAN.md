@@ -1,0 +1,300 @@
+# RJ AI Agent — Implementation Plan
+
+## Repository audit
+
+Repository: `Uchihashan/RJ`  
+Base branch: `main`  
+Working branch: `feature/rj-full-integration`
+
+The existing app is an Expo SDK 58 / React Native Android app. It already has Supabase email authentication, SecureStore-backed sessions, local PIN/password/biometric protection, Tamil/Tanglish/English video-language selection, local reminders, and a Supabase-backed durable job queue.
+
+The separate RJ Supabase backend already contains RLS-protected profile, settings, job, attempt, and schedule tables; a `pgmq` queue; a scheduled Edge Function worker; encrypted per-user Gemini/OpenRouter credentials; provider fallback; retry handling; and the first children's-story generation stage.
+
+## Verified gaps
+
+- The current chat screen is a placeholder; it echoes the user's text and does not call an AI assistant.
+- The worker currently handles only the `video_generation` job type and pauses after the story stage.
+- Tamil voice generation, visual generation, subtitle timing, rendering, YouTube OAuth, upload, and scheduled publishing are not implemented.
+- The UI currently uses text-only RJ branding. The approved Dragon + Crown RJ image must be used unchanged for the app icon and launch screen; no “AI Assistant” or “Personal AI Assistant” text may be added to the logo.
+- The current GitHub Actions workflows provide dependency/type checks, Android bundle export, and an installable Android APK build.
+
+## Target architecture
+
+1. **RJ conversation gateway** — authenticated Supabase Edge Function receives Tamil, Tanglish, and English messages, loads only the signed-in user's permitted context, and calls the configured free-first model provider from server-side Vault credentials.
+2. **Structured agent decisions** — model output is validated against a strict action schema. Ordinary answers return as messages; tasks become durable jobs; unsafe or external side effects are never executed from free-form model text.
+3. **Permission-controlled tools** — read-only tasks may run within the user's granted scope. Actions such as YouTube upload, publish, delete, account changes, connecting a new provider, or spending paid credits require clear user consent at the appropriate point.
+4. **Dynamic Tool Hub / integrations** — RJ includes an in-app catalogue where the user can search, connect, configure, test, pause, and disconnect tools/services. It must support a growing adapter model rather than a hard-coded list: coding/development tools, Google services, AI model providers, image/video/audio generation, storage, publishing, and future MCP/API integrations. Show each integration's capabilities, permissions, pricing/free-tier notes where verifiable, connection state, and required setup. The agent can recommend a tool for a task and guide the user through OAuth/API-key setup without asking for passwords in chat. Credentials are stored encrypted server-side and scoped per user. Unknown tools are not silently trusted: validate manifests, scopes, endpoints, and permissions before enabling them.
+5. **Google Flow / Google video provider support** — expose a Google video integration inside RJ's Tool Hub and creator workflow. The user must remain in RJ's UI: no forced navigation to the Flow website/app and no “open Flow to finish” step. Before implementation, verify Google's currently supported official developer interfaces and account/region/plan restrictions. Google's Flow product is a consumer creative studio; do not assume Flow's own credits or private website features are callable from an app API. If no official Flow API is available, use an official supported Google video-generation API (for example, Gemini/Veo where available) behind the same provider adapter, and label it accurately as Google video generation rather than claiming it is the Flow API. Do not use fragile browser-cookie scraping or unofficial account automation. If an authorized supported Flow connector/API becomes available, it can be added without changing the in-app workflow.
+6. **In-app video creation experience** — a user can type a prompt or request a video in RJ chat; RJ plans the job, asks only for essential missing details, shows an editable preview of the plan, then runs the pipeline in the background. The user stays in the RJ APK and sees progress, stages, generated previews, errors, retry/cancel controls, and the final video. The pipeline is: brief/prompt → script/storyboard → scene/image/video generation → Tamil voice-over → subtitles/captions → assembly/render → quality preview → user approval → publish/upload. Store outputs in the user's RJ project and storage; allow download/share from inside RJ. Do not hand the user off to an external editing website to complete the job.
+7. **Provider routing and cost controls** — define capability-based adapters (text, image, video, speech, transcription, rendering, storage, publishing). Route each stage to the best connected provider that meets the user's quality, language, privacy, and budget settings. Prefer genuinely free tiers when available, show quotas/credit use and any likely charge before a paid run, and never promise unlimited/free generation. Support provider fallback only when the fallback is compatible and the user has permitted it.
+8. **Durable execution** — all long-running work is recorded in RJ's queue, with idempotency keys, progress stages, retry/backoff, cancellation, and visible error states.
+9. **YouTube connection** — OAuth authorization uses the user's own Google account. Refresh tokens remain server-side and encrypted; publishing follows the user's configured privacy/scheduling policy. The user reviews title, description, visibility, thumbnail, and schedule and confirms before upload/publish.
+10. **Audit and security** — RLS for user-owned records, server-only secrets, validated tool inputs, rate limits, action audit records, least-privilege OAuth scopes, integration disconnect/revoke support, and no reuse of NOOR credentials or database.
+
+## Delivery sequence
+
+### Phase 1 — AI Brain foundation
+- Add authenticated conversation storage and an assistant Edge Function.
+- Add provider adapter/fallback shared with the existing worker.
+- Replace the echo-only chat with real streaming or request/response AI chat.
+- Add a typed task/action contract and a confirmation UI for side effects.
+- Add tests for language routing, malformed model output, authorization, and provider failure.
+
+### Phase 2 — Agent task execution and Tool Hub
+- Add a typed, capability-based tool registry with per-tool permission scopes and validated integration manifests.
+- Build the in-app Tool Hub: browse/search, connect, configure, test, view permissions/status, pause, and disconnect.
+- Add OAuth and secure API-key connection flows; never request or store provider passwords in chat.
+- Connect safe app tasks (create/list/update reminders and video projects) to real app/backend actions.
+- Add job progress, cancellation, retry, and audit history.
+- Require confirmation for external, paid, or destructive actions.
+
+### Phase 3 — In-app creator studio and Google video integration
+- Implement provider adapters for image, video, speech, subtitles, and rendering; evaluate supported Google video APIs and Flow integration honestly.
+- Build the complete resumable creator pipeline and in-app project/preview/editor experience.
+- Ensure prompt-to-video creation can complete within the RJ APK without redirecting to a separate creative website.
+- Implement Google OAuth and secure token storage for supported Google services.
+- Implement YouTube upload privacy selection, scheduling, and final pre-publish confirmation.
+- Add integration tests with mocked provider and YouTube responses, plus tests for quota exhaustion, provider fallback, cancellation, and interrupted rendering.
+
+### Phase 4 — Branding, Android QA, and release readiness
+- Apply the exact approved Dragon + Crown RJ logo unchanged to app icon and launch screen.
+- Keep the existing dark UI and approved RJ identity; do not add prohibited logo wording.
+- Run Expo dependency checks, Expo Doctor, TypeScript, Edge Function checks, Android export, and APK build.
+- Test sign-in, chat, tool connection/disconnection, permissions, paid-credit confirmation, video job recovery, preview, upload confirmation, language handling, and Android install/launch.
+
+## Acceptance criteria
+
+- RJ responds naturally in Tamil, Tanglish, and English.
+- Chat is connected to a real backend AI gateway; no echo-only placeholder remains.
+- The assistant can discover and use connected tools through a permission-controlled registry, and the user can connect/disconnect integrations from inside RJ.
+- Tool integrations are modular: adding a new supported API/MCP provider does not require rebuilding the entire agent architecture.
+- Google video generation is accessible from RJ's in-app workflow; RJ does not force the user to open Google Flow or another external editor to finish a video. The implementation must not misrepresent an official Flow API if none is available.
+- A user can enter a prompt in RJ, receive a generated video inside RJ, preview it, and approve upload from the same APK.
+- Long-running jobs survive app restarts and can be resumed or cancelled.
+- YouTube publishing uses the user's own OAuth connection and the configured privacy policy, with explicit confirmation before upload/publish.
+- Provider costs, credit consumption, and free-tier limits are shown accurately; paid actions require consent.
+- No provider keys, OAuth secrets, refresh tokens, or service-role credentials are bundled in the app or committed to Git.
+- All work stays in the RJ repository and RJ Supabase project. NOOR remains untouched.
+- The final approved logo is used as-is, with no added text or redesign.
+
+## Safety boundary
+
+Do not merge this branch into `main` or deploy production changes without the user's explicit approval. Never use NOOR infrastructure, credentials, or data for RJ.
+
+
+## Non-negotiable requirement: Autonomous Video Operations
+
+The user requires RJ to operate as an autonomous, cloud-run video production and publishing agent. This is a product requirement, not an optional enhancement to the editor.
+
+### A. Capability-based provider failover
+
+- Every production stage must declare required capabilities and accepted output formats: script/text, image, video clips, speech, transcription, captions, media assembly/rendering, storage, and YouTube publishing.
+- Maintain a server-side provider registry with per-user connection state, supported capabilities, model/format constraints, region availability, quota/rate-limit state, health, estimated cost, and priority.
+- Before a stage starts, select the best eligible provider for that exact capability and the user's quality/budget policy.
+- On quota exhaustion (HTTP 429, provider quota/resource-exhausted response), cooldown that provider for the provider-reported reset time when available; otherwise use bounded exponential backoff. Immediately try the next compatible, connected, user-authorized provider.
+- Also fail over for transient network/5xx/provider outages. Do not blindly retry invalid credentials, unsupported formats, policy blocks, or invalid input; mark the provider/configuration as needing attention and continue only with a compatible alternative.
+- Persist every attempt and provider decision. Do not repeat a paid operation after an ambiguous timeout unless the provider supports idempotency or the previous result has been reconciled.
+- Never claim that every job can always finish: if every compatible provider is unavailable, out of quota, disconnected, or over the user's budget, keep the job durable and resumable, show exactly which stage is blocked, and notify the user. Never silently switch to a paid provider without the user's prior spending permission.
+- No single vendor is mandatory. Integrations must be replaceable adapters; never depend on private browser cookies or unofficial web scraping.
+
+### B. Complete video pipeline
+
+A job is not complete when a story/script is generated. Track durable stages independently:
+1. Brief and schedule validation
+2. Script and storyboard
+3. Scene asset generation
+4. Voice-over and audio
+5. Captions/subtitle timing
+6. Timeline assembly and editing
+7. Render/export
+8. Quality checks and final preview
+9. YouTube metadata and thumbnail
+10. Upload as private/scheduled, then verify the platform's returned video ID and scheduled publish time
+
+Each stage stores inputs, outputs, provider, attempt history, timestamps, and retry state. A retry resumes from the last verified successful stage; it must not regenerate or re-charge completed stages unnecessarily. The final deliverable must be an actual playable video file, not just an editor form or script.
+
+### C. Multi-channel / multi-recipient publishing calendar
+
+- Support multiple independently authorized YouTube channels/destinations, each with its own encrypted OAuth tokens, channel identity, timezone, upload defaults, and permissions.
+- Let the user create a publishing plan in one request: destination/channel, video count, dates, exact local times, language/topic/template, visibility, and optional recurrence.
+- Support separate plans for two or more people/channels, with isolated content, assets, credentials, and schedules. Never cross-post to another person's channel unless that channel owner has authorized the connection and the user has permission to publish there.
+- Store schedule timestamps as timezone-aware instants and retain the IANA timezone used to enter them. Default the user's local schedule UI to Asia/Colombo only when that is the user's selected timezone.
+- Show a calendar/list with queued, generating, ready, upload-pending, scheduled, published, retrying, blocked, and failed states. Allow reschedule, pause, cancel, and retry.
+- Before the deadline, generate and render early enough to leave a configurable safety buffer. The scheduled publish time is the target; do not wait until the last minute to begin generation.
+- Prefer YouTube's supported scheduled-publishing flow: upload the completed video as private with the approved publish time when supported, then verify the video resource. If the channel/API does not support the requested operation or quota is exhausted, preserve the asset and report the exact issue; do not falsely mark it published.
+
+### D. App-closed execution and reliability
+
+- The Android app is only the control panel. Once a plan is saved, cloud database + durable queue + scheduled cloud worker own execution. Android background timers, local notifications, or the app remaining open must never be required.
+- Use the existing Supabase Postgres/pgmq queue and pg_cron worker as the durable scheduling foundation; extend the existing minute worker rather than creating a second competing scheduler.
+- Workers must claim work safely, use idempotency keys, lease/visibility timeouts, bounded concurrency, retry/backoff, dead-letter/blocked states, and periodic recovery of expired leases.
+- Each stage commits progress before proceeding. If a worker is restarted or a function reaches its runtime limit, another worker resumes from stored state.
+- Alert on deadline risk and final failure. The app should display server-side status whenever reopened; push notifications are helpful but not the source of truth.
+
+### E. Implementation order and acceptance tests
+
+1. Provider registry + capability-aware router + quota cooldown and attempt history.
+2. Durable pipeline stage state machine + resumable workers.
+3. Multi-channel OAuth credential isolation and YouTube publishing adapter.
+4. Calendar UI for bulk plans, multiple destinations, timezone-aware scheduling, and run status.
+5. End-to-end media rendering and verification.
+
+Acceptance tests must include: provider A returns 429 and provider B completes the same stage; all providers unavailable then job resumes after cooldown; app is force-closed and a scheduled job still runs; two channels receive only their own assigned videos; duplicate cron/worker invocations do not create duplicate uploads; a render completed early is published at the requested local time; a deadline cannot be met and RJ reports it rather than claiming success; and no paid fallback runs without prior consent.
+
+
+## Implementation status — 2026-11-25
+
+This status supersedes earlier audit bullets where they conflict.
+
+### Implemented on `feature/rj-full-integration`
+- Authenticated Tamil/Tanglish/English assistant request/response gateway using Gemini with OpenRouter fallback.
+- Per-user provider keys are retrieved server-side through the existing Vault RPC; keys are not bundled in the app.
+- Local app actions for video-project creation, reminder creation, and tab navigation require an explicit confirmation card; duplicate actions are prevented while a confirmed action runs, and the assistant reports the actual action result.
+- Tamil/Tanglish aliases for supported video, reminder, and navigation commands; a new message cancels an older unconfirmed action.
+- Signed-out video ideas are saved as local drafts and are not misreported as cloud-queued jobs; signed-in jobs use the durable cloud queue.
+- Video project queue and first story-generation worker stage.
+- Durable pipeline-stage schema, persisted progress display, and stage status tracking for running, blocked, waiting-retry, succeeded, and failed states.
+- Text-provider health and cooldown routing: quota/transient failures cool down a provider, compatible configured text providers are tried as fallback, and paused jobs can resume after a provider key is connected.
+- When no compatible image/video adapter is connected, the worker explicitly blocks at scene-assets rather than claiming a finished video.
+- Agent permission and action-audit schema, plus an authenticated `rj-agent-actions` Edge Function for per-user permission listing/updates, server-side allowlist checks, explicit-confirmation gating, and action completion audit.
+- Settings controls for enabling/disabling the currently supported agent tools (video project creation, reminder creation, and app navigation); new permissions default to disabled and each action still requires confirmation.
+- Server audit entries record proposed/confirmed/succeeded/failed/denied outcomes and store only allowlisted, sanitized action arguments.
+- Browser-only private CI artifact workflow; no public web deployment.
+- Reminder validation uses the requested reminder time, not the screen's default time.
+
+### Still not implemented / not verified
+- The permission/audit migration and Edge Function are committed on the feature branch but are not deployed to the hosted Supabase project. The enforcement currently covers the three app actions wired into the assistant (video project creation, reminder creation, and navigation); YouTube/provider-management actions are reserved in the allowlist but are not yet connected to UI execution.
+- Capability-aware adapters and provider selection for image, video, speech, captioning, rendering, storage, and YouTube are not complete.
+- No end-to-end playable video renderer or media asset pipeline exists yet.
+- No YouTube OAuth connection, multi-channel token management, upload, scheduled publishing, or verification flow exists yet.
+- No separate long-running media worker has been deployed. The current Supabase worker handles the story stage only.
+- Stage progress is persisted, but the full stage runner, retry/resume behavior per media stage, cancellation, and end-to-end acceptance tests remain outstanding.
+- Supabase migrations in this branch have not been applied to the hosted RJ project. Worker code that writes `job_stages` requires the autonomous-operations migration to be applied before that worker version is deployed.
+- No production Edge Function deployment, Render deployment, `main` merge, or APK build has been performed.
+
+### External prerequisites for actual full video publishing
+- A supported, authorized video-generation provider and its credentials. Google Flow is a consumer studio, not assumed to expose a public app API; use a documented Google Cloud/Gemini video API adapter only where the account, region, model, and billing permit it.
+- A speech/TTS provider, rendering runtime, and storage bucket with sufficient capacity.
+- Google OAuth client configuration and YouTube Data API project approval/quota for each channel owner. Refresh tokens must remain server-side and encrypted.
+- Explicit per-user paid-provider budget approval before any non-free generation or rendering is attempted.
+
+Do not describe RJ as a completed autonomous video publisher until the remaining items above are implemented, deployed with approval, and end-to-end tested.
+
+
+## Provider routing implementation update — 2026-11-25
+
+Implemented on feature/rj-full-integration (not deployed):
+
+- Added a typed provider registry with explicit capability matching. Current executable adapters are text-only: OpenRouter's free-model route and Gemini.
+- Added a capability catalog for text, image, video, speech, transcription, captions, media assembly, rendering, storage, YouTube upload/scheduling, and media analysis. The catalog does not pretend that missing adapters exist.
+- Added per-user provider policy records. Paid use is disabled by default; account-dependent Gemini billing is not treated as free.
+- Added provider attempt history with capability, provider/model, stage, status, HTTP status, safe error summary, and optional cost fields. No prompt bodies or credentials are written to this audit table.
+- Updated assistant and story worker to select only providers compatible with the requested capability, prefer free routing, respect provider cooldowns, and record provider attempts.
+- Added tests for free-only routing, compatible fallback ordering, capability mismatch, cooldown filtering, quota classification, and invalid credentials.
+
+Important cost-safety limitation:
+- Paid provider execution remains blocked in the app/worker until reliable per-request cost measurement and budget enforcement are implemented. A monthly budget field is policy metadata, not proof of spend enforcement; RJ does not expose a paid-enable control or claim a hard spend cap yet.
+- Gemini may be billable depending on the user's Google AI account tier. The worker will not silently use it. OpenRouter's free-model route remains the only currently eligible default text adapter.
+- The registry describes future pipeline capabilities, but image/video/speech/caption/render/storage/YouTube adapters are not implemented by this change.
+
+Verification:
+- CI now runs Deno checks and the provider-registry unit tests, in addition to the Expo/browser checks.
+- Hosted Supabase migrations and Edge Functions remain undeployed. The new migration must be applied before the updated assistant/worker functions can use the policy and attempt-history tables.
+- No main merge, production deploy, or APK build was performed.
+
+## Durable stage-lease update — 2026-11-25
+
+Implemented on `feature/rj-full-integration` (not deployed):
+
+- Added migration `20261125007000_rj_durable_stage_leases.sql` with a server-only `rj_claim_job_stage` RPC.
+- The RPC atomically claims a user-owned pipeline stage, increments its attempt counter, and records a lease timestamp.
+- Concurrent worker/cron invocations cannot both claim the same pending/running stage.
+- Expired running leases can be reclaimed after a bounded interval; legacy running rows with no lease timestamp are also recoverable.
+- The story worker now claims `script_storyboard` before calling any provider and archives duplicate queue deliveries that cannot obtain the stage lease.
+- Stage transitions to blocked, waiting-retry, succeeded, and failed clear the lease.
+
+Verification boundary:
+- The previous provider-routing commit passed the full browser workflow, including TypeScript, Expo config, Expo Doctor, Deno checks/provider tests, browser export, and artifact upload.
+- This new lease migration and worker integration require a fresh CI run; do not claim they are verified until that run succeeds.
+- Database migration remains branch-only and has not been applied to hosted Supabase.
+
+## Tamil speech adapter update — 2026-11-25
+
+Implemented on `feature/rj-full-integration` (adapter source only; not deployed or enabled):
+
+- Added a Google Gemini 3.8 Flash TTS REST adapter using the documented Interactions API response shape and WAV output.
+- Adapter validates input length, applies a bounded request timeout, decodes the audio response, and verifies the WAV container header before returning bytes.
+- Added parser tests for the Interactions API audio block and missing-audio responses.
+- Added `gemini_tts` to the capability registry and catalog as `account_dependent` / `disabled_by_policy`.
+- Added a routing test proving that even a positive paid budget cannot select Gemini TTS while the adapter remains disabled.
+
+Provider research:
+- Google's current speech-generation guide lists Tamil among supported languages for Gemini 3.8 Flash TTS and documents the Interactions API request/response format: https://ai.google.dev/gemini-api/docs/speech-generation
+- The Gemini API pricing page lists a free tier and a separate paid tier. A key alone does not prove which tier the project uses, and the free-tier usage may be used to improve Google's products: https://ai.google.dev/gemini-api/docs/pricing
+- Therefore the adapter is deliberately not connected to the live job runner. RJ must not make a TTS call until account-tier verification and reliable hard spend enforcement exist. No provider call or charge was made during implementation.
+
+Verification:
+- A fresh CI run is in progress for the TTS adapter and tests. Confirm the latest run before describing this batch as passing.
+- No hosted Supabase migration/function deployment, Render deployment, APK build, or `main` merge was performed.
+
+## FFmpeg cloud-rendering foundation — 2026-11-25
+
+Implemented on `feature/rj-full-integration` (source and migration only; not deployed):
+
+- Added an isolated Node 22 Docker worker under `workers/rj-renderer`.
+- Worker polls durable `scene_assets` stages from Supabase, verifies the script stage is complete, and claims the stage through `rj_claim_job_stage` before doing work.
+- Uses FFmpeg to assemble a 1280×720 H.264 MP4 from Tamil-capable vector story cards; Sharp rasterizes SVG cards with Noto fonts.
+- Creates a private MP4, JPEG thumbnail, and SRT captions sidecar in the `rj-renders` Storage bucket.
+- Runs FFprobe to verify that the exported MP4 has a positive duration.
+- Updates scene, voice, captions, edit, render, quality-check, thumbnail, and YouTube stages with explicit outcomes.
+- Marks voice as skipped (no TTS call), YouTube upload/schedule as blocked until a channel is connected, and the job completed once the playable storyboard MP4 exists.
+- App project cards now create one-hour private signed links for playback and captions; the signed URLs are generated only after the user taps the link.
+- Worker has bounded scene count/text length/file size, escaped SVG text, subprocess timeout, private storage paths, structured logs, and graceful SIGTERM/SIGINT handling.
+- Added worker unit tests for Tamil/English scene parsing, XML escaping, text wrapping, SRT timing, and bounded scene duration.
+- CI now installs, tests, and compiles the renderer worker.
+
+### Honest output boundary
+
+The current first renderer produces a silent, text-led storyboard video. It is a real MP4, but it does **not** yet contain AI-generated images, narration, speech-aligned subtitles, or background music. It does not publish to YouTube. The worker labels these limits in job output and stage status rather than pretending those capabilities are complete.
+
+### Provider cost policy
+
+- Gemini 3.1 Flash Lite Image is catalogued as paid-only/disabled; Google's current pricing page lists no free tier (about USD 0.0336 per 1K image).
+- Gemini Omni Flash video is catalogued as paid-only/disabled; Google's current pricing page lists paid-tier output at approximately USD 0.10 per second of 720p video.
+- No image/video generation API calls are made by this worker.
+- FFmpeg itself is open-source, but Render compute and Supabase storage may incur infrastructure charges. The Render worker is not created or deployed; the user must review the current Render plan price and authorize deployment.
+- Migration `20261125008000_rj_render_storage_and_media_catalog.sql` creates a private `rj-renders` bucket and owner-scoped read policy. It is not deployed.
+
+Official provider references:
+- Gemini image model/pricing: https://ai.google.dev/gemini-api/docs/pricing
+- Gemini Omni Flash video model/pricing: https://ai.google.dev/gemini-api/docs/pricing
+- FFmpeg concatenation reference: https://www.ffmpeg.org/faq.html
+
+No Render service, hosted Supabase migration, Edge Function, production deployment, main-branch merge, or APK build was performed.
+
+
+## Free-only image and Tamil narration update — 2026-11-25
+
+Implemented on `feature/rj-full-integration` (branch-only; not deployed):
+
+- Added Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell` as the optional image provider. RJ stores the Account ID and scoped API token together in Supabase Vault; the app requires an explicit confirmation that the account is on Cloudflare Workers **Free**, not Workers Paid.
+- Cloudflare Workers Free has a 10,000 Neurons/day free allocation and rejects further requests after the allocation is exhausted. A 3036 daily-quota response is recorded in `provider_attempts`; RJ stops image calls for that user until the next UTC daily reset. A normal 429 rate limit uses a 30-minute cooldown.
+- If Cloudflare is not configured, unavailable, or quota-limited, remaining scenes use local vector artwork. No paid image provider is used. There is currently one hosted free image provider; local vector artwork is the zero-cost fallback, not another AI image model.
+- Added two local Piper Tamil speech models to the renderer: tinisoft Rasa Female (CC BY 4.0) primary and Jeyaram-K HemaLatha (Apache-2.0) fallback. The Docker build downloads both model weights and runs a Tamil synthesis smoke test.
+- Tamil narration is synthesized locally per scene; FFmpeg muxes it into the MP4 and uses per-scene audio durations for SRT timing. If both local voices fail or the story is not Tamil, the video remains silent rather than calling a paid TTS API.
+- Registered both Piper models as free speech providers and added provider-routing tests for the primary/fallback order.
+- Added Cloudflare image overlay SVG and tests for speech-duration-based SRT timing.
+- Renderer records the selected image mode, image count, local voice model, narration path, and audio state in stage/job output.
+
+Provider references:
+- Cloudflare FLUX.1 schnell API: https://developers.cloudflare.com/workers-ai/models/flux-1-schnell/
+- Cloudflare Workers AI free allocation and hard-stop behavior: https://developers.cloudflare.com/workers-ai/platform/pricing/
+- Cloudflare daily quota error 3036: https://developers.cloudflare.com/workers-ai/platform/errors/
+- Piper Tamil Rasa Female (CC BY 4.0): https://huggingface.co/tinisoft/piper-ta_IN-rasa_female-medium
+- Piper Tamil HemaLatha (Apache-2.0): https://huggingface.co/Jeyaram-K/piper-tamil-voices
+
+Verification boundary:
+- The renderer's TypeScript/unit tests and Docker build have passed on the preceding commit; the latest provider-catalog/cooldown/doc update CI run is still in progress.
+- Cloudflare credentials are not configured; no Cloudflare inference call was made.
+- No hosted Supabase migration/function deployment, Render service deployment, production deployment, main merge, or APK build was performed.
+- The worker source is ready for free-only media processing, but the actual cloud worker still requires a host. Do not deploy it to a paid service without explicit approval; free hosting may not provide a persistent background worker.

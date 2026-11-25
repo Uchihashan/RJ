@@ -17,26 +17,42 @@ import { StatusBar } from "expo-status-bar";
 import * as SecureStore from "expo-secure-store";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Notifications from "expo-notifications";
+import ToolHubScreen from "./src/components/ToolHubScreen";
+import AssistantScreen from "./src/components/AssistantScreen";
+import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
-type Tab = "Home" | "Create" | "Schedule" | "Settings";
-type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string };
+type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
+type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; hasNarration?: boolean };
+type PipelineStage = { job_id: string; stage_key: string; stage_order: number; status: string; selected_provider?: string | null; error_message?: string | null };
+const PIPELINE_STAGE_LABELS: Record<string, string> = { brief: "Brief", script_storyboard: "Story & script", scene_assets: "Visual scenes", voice_audio: "Voice-over", captions: "Captions", timeline_edit: "Timeline edit", render_export: "Render video", quality_check: "Quality check", metadata_thumbnail: "Title & thumbnail", youtube_upload: "YouTube upload", youtube_schedule_verify: "Schedule verification" };
 
 function jobStatusLabel(row: any): string {
-  if (row.output?.stage === "story_ready") return "Story ready — voice and video steps next";
+  if (row.output?.stage === "rendered") {
+    const render = row.output?.render ?? {};
+    const audioLabel = render.audio === true ? "Tamil narration" : "no narration";
+    const visualLabel = Number(render.generated_image_count ?? 0) > 0 ? "AI-generated images" : "local scene artwork";
+    return `Video rendered — ${audioLabel}, ${visualLabel}`;
+  }
+  if (row.status === "blocked") return row.current_stage === "scene_assets" ? "Story saved — waiting for image/video provider" : "Blocked — connect the required provider";
+  if (row.output?.stage === "story_ready") return "Story ready — voice, visuals and rendering still pending";
   if (row.status === "queued") return "Queued — RJ worker will check providers";
   if (row.status === "running") return "Generating story…";
   if (row.status === "waiting_retry") return "Provider busy — automatic retry scheduled";
   if (row.status === "paused" && row.error_code === "provider_not_configured") return "Paused — AI provider key needed";
+  if (row.status === "paused" && row.error_code === "paid_provider_consent_required") return "Paused — paid provider needs spending controls";
   if (row.status === "paused") return "Paused";
   if (row.status === "completed") return "Completed";
   if (row.status === "failed") return "Failed — check settings and try again";
   return row.status;
 }
 type Reminder = { id: string; title: string; time: string; notificationId: string | null };
+type AgentToolKey = "video.create" | "reminder.create" | "navigation.open";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false })
-});
+if (Platform.OS !== "web") {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false })
+  });
+}
 
 const RED = "#F3263D";
 const BG = "#080808";
@@ -93,6 +109,7 @@ export default function App() {
   const [topic, setTopic] = useState("");
   const [language, setLanguage] = useState("Tamil");
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobStages, setJobStages] = useState<Record<string, PipelineStage[]>>({});
   const [jobsOwnerId, setJobsOwnerId] = useState<string | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [chat, setChat] = useState("");
@@ -119,9 +136,15 @@ export default function App() {
   const [authOtp, setAuthOtp] = useState("");
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [openRouterKeyInput, setOpenRouterKeyInput] = useState("");
+  const [groqKeyInput, setGroqKeyInput] = useState("");
+  const [cloudflareAccountInput, setCloudflareAccountInput] = useState("");
+  const [cloudflareTokenInput, setCloudflareTokenInput] = useState("");
+  const [cloudflareFreePlanConfirmed, setCloudflareFreePlanConfirmed] = useState(false);
   const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
   const [providerBusy, setProviderBusy] = useState<string | null>(null);
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [agentPermissions, setAgentPermissions] = useState<Record<string, boolean>>({});
+  const [agentPermissionBusy, setAgentPermissionBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -149,12 +172,21 @@ export default function App() {
   useEffect(() => {
     if (!authReady || !dataLoaded) return;
     if (!session || !supabase) {
-      setJobs([]);
-      setJobsOwnerId(null);
-      return;
+      let active = true;
+      setJobStages({});
+      AsyncStorage.getItem("rj_video_jobs_local").then(saved => {
+        if (!active) return;
+        const localJobs = saved ? JSON.parse(saved) as Job[] : [];
+        setJobs(localJobs);
+        setJobsOwnerId("local");
+      }).catch(() => {
+        if (active) { setJobs([]); setJobsOwnerId("local"); }
+      });
+      return () => { active = false; };
     }
     let active = true;
     setJobs([]);
+    setJobStages({});
     setJobsOwnerId(null);
     const userJobsKey = "rj_video_jobs_" + session.user.id;
     let localJobsFallback: Job[] = [];
@@ -164,7 +196,7 @@ export default function App() {
       localJobsFallback = localJobs;
       if (active) setJobs(localJobs);
       const { data, error } = await supabase.from("jobs")
-        .select("id,input,status,created_at,output,error_code")
+        .select("id,input,status,created_at,output,error_code,current_stage")
         .eq("user_id", session.user.id)
         .eq("job_type", "video_generation")
         .order("created_at", { ascending: false });
@@ -180,12 +212,31 @@ export default function App() {
         language: String(row.input?.language ?? "Tamil"),
         createdAt: new Date(row.created_at).toLocaleString(),
         status: jobStatusLabel(row),
-        story: typeof row.output?.story === "string" ? row.output.story : undefined
+        story: typeof row.output?.story === "string" ? row.output.story : undefined,
+        description: typeof row.input?.description === "string" ? row.input.description : undefined,
+        aspectRatio: typeof row.input?.aspect_ratio === "string" ? row.input.aspect_ratio : undefined,
+        captionsEnabled: typeof row.input?.captions_enabled === "boolean" ? row.input.captions_enabled : undefined,
+        renderPath: typeof row.output?.render?.video_path === "string" ? row.output.render.video_path : undefined,
+        thumbnailPath: typeof row.output?.render?.thumbnail_path === "string" ? row.output.render.thumbnail_path : undefined,
+        captionsPath: typeof row.output?.render?.captions_path === "string" ? row.output.render.captions_path : undefined,
+        renderDuration: typeof row.output?.render?.duration_seconds === "number" ? row.output.render.duration_seconds : undefined,
+        renderMode: typeof row.output?.render?.visual_mode === "string" ? row.output.render.visual_mode : undefined,
+        generatedImageCount: typeof row.output?.render?.generated_image_count === "number" ? row.output.render.generated_image_count : undefined,
+        hasNarration: row.output?.render?.audio === true
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
       if (active) {
         setJobs(merged);
         setJobsOwnerId(session.user.id);
+      }
+      const { data: stages } = await supabase.from("job_stages")
+        .select("job_id,stage_key,stage_order,status,selected_provider,error_message")
+        .eq("user_id", session.user.id)
+        .order("stage_order", { ascending: true });
+      if (active && stages) {
+        const grouped: Record<string, PipelineStage[]> = {};
+        for (const stage of stages as PipelineStage[]) (grouped[stage.job_id] ??= []).push(stage);
+        setJobStages(grouped);
       }
     })().catch(() => {
       if (active) {
@@ -216,7 +267,7 @@ export default function App() {
     let active = true;
     const refreshJobs = async () => {
       const { data, error } = await client.from("jobs")
-        .select("id,input,status,created_at,output,error_code")
+        .select("id,input,status,created_at,output,error_code,current_stage")
         .eq("user_id", session.user.id)
         .eq("job_type", "video_generation")
         .order("created_at", { ascending: false });
@@ -227,16 +278,45 @@ export default function App() {
         language: String(row.input?.language ?? "Tamil"),
         createdAt: new Date(row.created_at).toLocaleString(),
         status: jobStatusLabel(row),
-        story: typeof row.output?.story === "string" ? row.output.story : undefined
+        story: typeof row.output?.story === "string" ? row.output.story : undefined,
+        description: typeof row.input?.description === "string" ? row.input.description : undefined,
+        aspectRatio: typeof row.input?.aspect_ratio === "string" ? row.input.aspect_ratio : undefined,
+        captionsEnabled: typeof row.input?.captions_enabled === "boolean" ? row.input.captions_enabled : undefined,
+        renderPath: typeof row.output?.render?.video_path === "string" ? row.output.render.video_path : undefined,
+        thumbnailPath: typeof row.output?.render?.thumbnail_path === "string" ? row.output.render.thumbnail_path : undefined,
+        captionsPath: typeof row.output?.render?.captions_path === "string" ? row.output.render.captions_path : undefined,
+        renderDuration: typeof row.output?.render?.duration_seconds === "number" ? row.output.render.duration_seconds : undefined,
+        renderMode: typeof row.output?.render?.visual_mode === "string" ? row.output.render.visual_mode : undefined
       }));
       setJobs(remoteJobs);
       setJobsOwnerId(session.user.id);
+      const { data: stages } = await client.from("job_stages")
+        .select("job_id,stage_key,stage_order,status,selected_provider,error_message")
+        .eq("user_id", session.user.id)
+        .order("stage_order", { ascending: true });
+      if (active && stages) {
+        const grouped: Record<string, PipelineStage[]> = {};
+        for (const stage of stages as PipelineStage[]) (grouped[stage.job_id] ??= []).push(stage);
+        setJobStages(grouped);
+      }
     };
     const interval = setInterval(refreshJobs, 20000);
     return () => { active = false; clearInterval(interval); };
   }, [session]);
 
   useEffect(() => {
+    if (Platform.OS === "web") {
+      // Browser demo: device PIN and biometrics are native-only features.
+      setPinConfigured(false);
+      setPasswordConfigured(false);
+      setLocked(false);
+      setBiometricAvailable(false);
+      setBiometricEnabled(false);
+      AsyncStorage.getItem("rj_reminders").then(saved => {
+        if (saved) setReminders(JSON.parse(saved) as Reminder[]);
+      }).catch(() => undefined).finally(() => setDataLoaded(true));
+      return;
+    }
     (async () => {
       const savedReminders = await AsyncStorage.getItem("rj_reminders");
       if (savedReminders) setReminders(JSON.parse(savedReminders) as Reminder[]);
@@ -261,43 +341,98 @@ export default function App() {
     if (!dataLoaded || !authReady) return;
     const writes: [string, string][] = [["rj_reminders", JSON.stringify(reminders)]];
     if (session && jobsOwnerId === session.user.id) writes.push(["rj_video_jobs_" + session.user.id, JSON.stringify(jobs)]);
+    else if (!session && jobsOwnerId === "local") writes.push(["rj_video_jobs_local", JSON.stringify(jobs)]);
     AsyncStorage.multiSet(writes).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
   }, [jobs, reminders, dataLoaded, authReady, session, jobsOwnerId]);
 
-  const createJob = async () => {
-    const clean = topic.trim();
+  useEffect(() => {
+    if (!session || !supabase) { setAgentPermissions({}); return; }
+    let active = true;
+    supabase.functions.invoke("rj-agent-actions", { body: { action: "list" } }).then(({ data, error }) => {
+      if (!active || error || !Array.isArray(data?.permissions)) return;
+      const next: Record<string, boolean> = {};
+      for (const item of data.permissions) next[item.tool_key] = item.enabled === true;
+      setAgentPermissions(next);
+    });
+    return () => { active = false; };
+  }, [session]);
+
+  const setAgentToolPermission = async (toolKey: AgentToolKey, enabled: boolean) => {
+    if (!supabase || !session || agentPermissionBusy) return;
+    setAgentPermissionBusy(toolKey);
+    try {
+      const { data, error } = await supabase.functions.invoke("rj-agent-actions", {
+        body: { action: "set_permission", tool_key: toolKey, enabled },
+      });
+      if (error || !data?.ok) throw error ?? new Error(data?.error ?? "Permission update failed.");
+      setAgentPermissions(current => ({ ...current, [toolKey]: enabled }));
+      Alert.alert("RJ permission updated", enabled ? "This tool is enabled. RJ will still ask before each action." : "This tool is disabled.");
+    } catch (error: any) {
+      Alert.alert("Permission update failed", error?.message ?? "Could not update RJ permission.");
+    } finally { setAgentPermissionBusy(null); }
+  };
+
+  const beginAgentAction = async (toolKey: AgentToolKey, args: Record<string, string>): Promise<string> => {
+    if (!supabase || !session) throw new Error("Sign in to enable audited RJ actions.");
+    const { data, error } = await supabase.functions.invoke("rj-agent-actions", {
+      body: { action: "begin_action", tool_key: toolKey, arguments: args, confirmed: true },
+    });
+    if (error || !data?.ok || !data?.request_id) throw new Error(data?.error ?? error?.message ?? "RJ permission check failed. No action was run.");
+    return String(data.request_id);
+  };
+
+  const finishAgentAction = async (requestId: string, status: "succeeded" | "failed", summary: string) => {
+    if (!supabase) throw new Error("RJ cloud connection is unavailable for audit completion.");
+    const { data, error } = await supabase.functions.invoke("rj-agent-actions", {
+      body: { action: "finish_action", request_id: requestId, status, result_summary: summary },
+    });
+    if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? "RJ could not complete the action audit.");
+  };
+
+  const createJob = async (requestedTopic?: string, requestedLanguage?: string): Promise<string> => {
+    const clean = (requestedTopic ?? topic).trim();
+    const projectLanguage = requestedLanguage ?? language;
     if (!clean) {
       Alert.alert("Topic needed", "Enter a video heading or story topic first.");
-      return;
+      return "தலைப்பு இல்லை. Video topic கொடுத்துவிட்டு மீண்டும் முயற்சி செய்யுங்கள்.";
     }
     if (session && jobsOwnerId !== session.user.id) {
       Alert.alert("Projects loading", "Wait a moment for your account projects to finish syncing, then try again.");
-      return;
+      return "Projects இன்னும் sync ஆகிறது. சிறிது நேரம் கழித்து மீண்டும் முயற்சி செய்யுங்கள்.";
     }
+    const cloudQueueAvailable = !!(session && supabase);
     const item: Job = {
       id: String(Date.now()),
       topic: clean,
-      language,
+      language: projectLanguage,
       createdAt: new Date().toLocaleString(),
-      status: "Queued — RJ worker will check providers"
+      status: cloudQueueAvailable ? "Queued — RJ worker will check providers" : "Saved on this phone — sign in to send to RJ worker"
     };
     if (session && supabase) {
       const { data, error } = await supabase.from("jobs").insert({
         user_id: session.user.id,
         job_type: "video_generation",
         status: "queued",
-        input: { topic: clean, language, stage: "queued" }
+        idempotency_key: "video_generation:" + session.user.id + ":" + Date.now().toString(),
+        input: { topic: clean, language: projectLanguage, stage: "queued" }
       }).select("id").single();
       if (data?.id) item.id = data.id;
       if (error) {
         Alert.alert("Cloud queue issue", "RJ could not send this project to the cloud worker. Please check your connection and try again.");
-        return;
+        return "Cloud queue-க்கு project அனுப்ப முடியவில்லை. Internet connection சரிபார்த்து மீண்டும் முயற்சி செய்யுங்கள்.";
       }
     }
+    if (!cloudQueueAvailable) setJobsOwnerId("local");
     setJobs(current => [item, ...current]);
     setTopic("");
-    Alert.alert("Added to RJ queue", "Your story request is safely queued. If no AI provider key is configured yet, RJ will pause it without losing the job.");
+    if (cloudQueueAvailable) {
+      Alert.alert("Added to RJ queue", "Your story request is safely queued. If no AI provider key is configured yet, RJ will pause it without losing the job.");
+      setTab("Create");
+      return "Video project RJ cloud queue-ல் சேர்க்கப்பட்டது. இது இன்னும் rendered video அல்ல; முதலில் story generation நடக்கும்.";
+    }
+    Alert.alert("Saved on this phone", "This is a local draft only. Sign in to RJ to send it to the cloud worker.");
     setTab("Create");
+    return "Video project இந்த phone-ல் local draft ஆக save செய்யப்பட்டது. Cloud worker-க்கு அனுப்ப sign in செய்ய வேண்டும்.";
   };
 
   const submitAuth = async () => {
@@ -389,7 +524,7 @@ export default function App() {
     }
   };
 
-  const saveProviderKey = async (provider: "gemini" | "openrouter", value: string) => {
+  const saveProviderKey = async (provider: "gemini" | "openrouter" | "groq" | "cloudflare", value: string) => {
     if (!supabase || !session) return;
     const apiKey = value.trim();
     if (apiKey.length < 20) {
@@ -405,7 +540,9 @@ export default function App() {
       if (error) throw error;
       setProviderStatus(current => ({ ...current, [provider]: true }));
       if (provider === "gemini") setGeminiKeyInput("");
-      else setOpenRouterKeyInput("");
+      else if (provider === "openrouter") setOpenRouterKeyInput("");
+      else if (provider === "groq") setGroqKeyInput("");
+      else { setCloudflareAccountInput(""); setCloudflareTokenInput(""); setCloudflareFreePlanConfirmed(false); }
       Alert.alert("Provider saved securely", "The key is encrypted in RJ's backend. Any jobs waiting for a provider will be resumed automatically.");
     } catch (error: any) {
       Alert.alert("Could not save provider", error?.message ?? "RJ could not securely store this API key.");
@@ -420,49 +557,66 @@ export default function App() {
     if (error) Alert.alert("Sign-out issue", error.message);
   };
 
-  const sendChat = () => {
-    const message = chat.trim();
-    if (!message) return;
-    setChatReply("I received: “" + message + "”. The assistant workflow and AI provider still need to be connected in the next build stage.");
-    setChat("");
+  const saveProjectEdits = async (id: string, nextTopic: string, nextStory: string, description: string, aspectRatio: string, captionsEnabled: boolean) => {
+    const existing = jobs.find(job => job.id === id);
+    setJobs(current => current.map(job => job.id === id
+      ? { ...job, topic: nextTopic, story: nextStory, description, aspectRatio, captionsEnabled, status: "Edits saved — render provider not connected" }
+      : job));
+    if (session && supabase && existing && /^[0-9a-f-]{36}$/i.test(id)) {
+      const { error } = await supabase.rpc("rj_update_video_project", {
+        p_job_id: id,
+        p_topic: nextTopic,
+        p_story: nextStory,
+        p_description: description,
+        p_aspect_ratio: aspectRatio,
+        p_captions_enabled: captionsEnabled,
+      });
+      if (error) {
+        Alert.alert("Cloud save issue", "Your edits are saved on this phone, but cloud sync failed: " + error.message);
+      }
+    }
   };
 
-  const addReminder = async () => {
-    const title = scheduleTitle.trim();
+  const addReminder = async (requestedTitle?: string, requestedTime?: string): Promise<string> => {
+    const title = (requestedTitle ?? scheduleTitle).trim();
+    const reminderTime = requestedTime ?? scheduleTime;
     if (!title) {
       Alert.alert("Reminder needed", "Enter what you want RJ to remind you about.");
-      return;
+      return "Reminder title இல்லை. என்ன நினைவூட்ட வேண்டும் என்று சொல்லுங்கள்.";
     }
-    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(scheduleTime)) {
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(reminderTime)) {
       Alert.alert("Time not valid", "Use 24-hour format, for example 18:30.");
-      return;
+      return "நேரம் சரியில்லை. 24-hour format-ல் 18:30 போல கொடுங்கள்.";
     }
     let notificationId: string | null = null;
-    try {
-      if (Platform.OS === "android") {
-        await Notifications.setNotificationChannelAsync("rj-reminders", {
-          name: "RJ reminders", importance: Notifications.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250], lightColor: RED
-        });
+    if (Platform.OS !== "web") {
+      try {
+        if (Platform.OS === "android") {
+          await Notifications.setNotificationChannelAsync("rj-reminders", {
+            name: "RJ reminders", importance: Notifications.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250], lightColor: RED
+          });
+        }
+        const current = await Notifications.getPermissionsAsync();
+        const permission = current.status === "granted" ? current : await Notifications.requestPermissionsAsync();
+        if (permission.status === "granted") {
+          const [hour, minute] = reminderTime.split(":").map(Number);
+          const date = new Date();
+          date.setHours(hour, minute, 0, 0);
+          if (date.getTime() <= Date.now()) date.setDate(date.getDate() + 1);
+          notificationId = await Notifications.scheduleNotificationAsync({
+            content: { title: "RJ Reminder", body: title, sound: "default" },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date, channelId: "rj-reminders" }
+          });
+        }
+      } catch {
+        Alert.alert("Notification unavailable", "The reminder will still be saved inside RJ, but Android notification scheduling failed.");
       }
-      const current = await Notifications.getPermissionsAsync();
-      const permission = current.status === "granted" ? current : await Notifications.requestPermissionsAsync();
-      if (permission.status === "granted") {
-        const [hour, minute] = scheduleTime.split(":").map(Number);
-        const date = new Date();
-        date.setHours(hour, minute, 0, 0);
-        if (date.getTime() <= Date.now()) date.setDate(date.getDate() + 1);
-        notificationId = await Notifications.scheduleNotificationAsync({
-          content: { title: "RJ Reminder", body: title, sound: "default" },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date, channelId: "rj-reminders" }
-        });
-      }
-    } catch {
-      Alert.alert("Notification unavailable", "The reminder will still be saved inside RJ, but Android notification scheduling failed.");
     }
-    const item: Reminder = { id: String(Date.now()), title, time: scheduleTime, notificationId };
+    const item: Reminder = { id: String(Date.now()), title, time: reminderTime, notificationId };
     setReminders(current => [item, ...current]);
     setScheduleTitle("");
     Alert.alert("Reminder saved", notificationId ? "RJ will notify you at the selected time." : "Saved in RJ. Allow notifications in Android settings to receive an alert.");
+    return notificationId ? "Reminder save செய்யப்பட்டது. Android notification schedule-மும் அமைக்கப்பட்டது." : "Reminder RJ-ல் save செய்யப்பட்டது. Notification permission இல்லாததால் alert schedule ஆகவில்லை.";
   };
 
   const savePin = async () => {
@@ -537,13 +691,7 @@ export default function App() {
         <Text style={styles.heroSub}>உங்கள் அடுத்த வேலையைச் சொல்லுங்கள்.</Text>
         <Text style={styles.heroSub}>Tell RJ what you want to get done today.</Text>
       </View>
-      <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>Assistant</Text>
-        <Text style={styles.reply}>{chatReply}</Text>
-        <Field label="Your message" value={chat} onChangeText={setChat} placeholder="Tamil / Tanglish / English..." multiline />
-        <ActionButton title="Send message" onPress={sendChat} />
-        <Text style={styles.note}>AI replies are not connected yet. This screen is ready for the assistant backend.</Text>
-      </View>
+      <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={async (value) => { setTab(value as Tab); return value + " screen திறக்கப்பட்டது."; }} onBeginAgentAction={beginAgentAction} onFinishAgentAction={finishAgentAction} />
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.quickRow}>
@@ -572,7 +720,7 @@ export default function App() {
         ))}
       </View>
       <ActionButton title="Queue story generation" onPress={createJob} />
-      <Text style={styles.note}>Story generation runs through RJ’s background queue when a Gemini or OpenRouter key is configured. Voice-over, visuals, subtitles, rendering and YouTube publishing are still separate stages.</Text>
+      <Text style={styles.note}>Story generation runs through RJ’s background queue using OpenRouter Free first and Groq Free as automatic fallback. Voice-over, visuals, subtitles, rendering and YouTube publishing are still separate stages.</Text>
       <View style={styles.divider} />
       <Text style={styles.sectionTitle}>Your video projects</Text>
       {jobs.length === 0 ? <Text style={styles.muted}>No projects yet. Add your first topic above.</Text> : jobs.map(job => (
@@ -580,6 +728,47 @@ export default function App() {
           <Text style={styles.jobTitle}>{job.topic}</Text>
           <Text style={styles.muted}>{job.language} • {job.createdAt}</Text>
           <Text style={styles.jobStatus}>{job.status}</Text>
+          {job.renderPath ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={styles.muted}>
+                {job.renderDuration ? Math.round(job.renderDuration) + " sec" : "Rendered"} • {job.generatedImageCount ? job.generatedImageCount + " AI images" : "Local scene artwork"} • {job.hasNarration ? "Tamil narration" : "No narration"}
+              </Text>
+              <Pressable onPress={async () => {
+                if (!supabase) return;
+                const { data, error } = await supabase.storage.from("rj-renders").createSignedUrl(job.renderPath!, 3600);
+                if (error || !data?.signedUrl) {
+                  Alert.alert("Video unavailable", "RJ could not create a private playback link. Check that the render storage migration is deployed.");
+                  return;
+                }
+                await Linking.openURL(data.signedUrl);
+              }}>
+                <Text style={{ color: RED, marginTop: 8, fontWeight: "700" }}>Play rendered video</Text>
+              </Pressable>
+              {job.captionsPath ? (
+                <Pressable onPress={async () => {
+                  if (!supabase) return;
+                  const { data, error } = await supabase.storage.from("rj-renders").createSignedUrl(job.captionsPath!, 3600);
+                  if (error || !data?.signedUrl) {
+                    Alert.alert("Captions unavailable", "RJ could not create a private captions link.");
+                    return;
+                  }
+                  await Linking.openURL(data.signedUrl);
+                }}>
+                  <Text style={{ color: RED, marginTop: 8 }}>Open captions (SRT)</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+          {jobStages[job.id]?.length ? (
+            <View style={{ marginTop: 10, paddingTop: 9, borderTopWidth: 1, borderTopColor: "#383838" }}>
+              <Text style={styles.muted}>Pipeline: {jobStages[job.id].filter(stage => stage.status === "succeeded").length}/11 stages complete</Text>
+              {jobStages[job.id].filter(stage => ["running", "blocked", "failed", "waiting_retry"].includes(stage.status)).map(stage => (
+                <Text key={stage.stage_key} style={[styles.muted, { color: stage.status === "blocked" || stage.status === "failed" ? "#F0A23A" : "#E2E2E2", marginTop: 4 }]}>
+                  {PIPELINE_STAGE_LABELS[stage.stage_key] ?? stage.stage_key}: {stage.status === "blocked" ? "Waiting for required provider" : stage.status === "failed" ? "Needs attention" : stage.status === "waiting_retry" ? "Retry scheduled" : "In progress"}
+                </Text>
+              ))}
+            </View>
+          ) : null}
           {job.story ? (
             <>
               <Text style={styles.muted}>{expandedJobId === job.id ? job.story : job.story.slice(0, 420) + (job.story.length > 420 ? "…" : "")}</Text>
@@ -602,7 +791,7 @@ export default function App() {
       <Field label="Task" value={scheduleTitle} onChangeText={setScheduleTitle} placeholder="Example: Prepare today's kids story" />
       <Field label="Time (24-hour)" value={scheduleTime} onChangeText={setScheduleTime} placeholder="18:00" />
       <ActionButton title="Save reminder" onPress={addReminder} />
-      <Text style={styles.note}>RJ schedules local Android notifications. Delivery time can still be affected by Android battery and alarm settings.</Text>
+      <Text style={styles.note}>{Platform.OS === "web" ? "Browser demo: reminders are saved locally for testing; browser notifications are not enabled here." : "RJ schedules local Android notifications. Delivery time can still be affected by Android battery and alarm settings."}</Text>
       <View style={styles.divider} />
       <Text style={styles.sectionTitle}>Saved reminders</Text>
       {reminders.length === 0 ? <Text style={styles.muted}>Nothing scheduled yet.</Text> : reminders.map(r => <Text key={r.id} style={styles.listLine}>• {r.title} • {r.time}</Text>)}
@@ -611,7 +800,7 @@ export default function App() {
 
   const renderSettings = () => (
     <>
-      <View style={styles.panel}>
+      {Platform.OS !== "web" ? <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Security</Text>
         <Text style={styles.muted}>Set a local PIN to protect this app on this device.</Text>
         <Field label="New PIN (4–8 digits)" value={pin} onChangeText={setPin} placeholder="Enter PIN" secureTextEntry />
@@ -626,6 +815,27 @@ export default function App() {
         <ActionButton title={biometricEnabled ? "Turn off biometric unlock" : "Enable biometric unlock"} onPress={toggleBiometric} secondary />
         <Text style={styles.listLine}>Biometric unlock: {biometricEnabled ? "On" : "Off"}</Text>
         {pinConfigured && <ActionButton title="Lock RJ now" onPress={() => setLocked(true)} secondary />}
+      </View> : <View style={styles.panel}>
+        <Text style={styles.sectionTitle}>Device security</Text>
+        <Text style={styles.muted}>PIN, password and biometric settings are tested on the Android Main App. They are intentionally unavailable in this browser-only demo.</Text>
+      </View>}
+      <View style={styles.panel}>
+        <Text style={styles.sectionTitle}>AI Agent permissions</Text>
+        <Text style={styles.muted}>ஒவ்வொரு tool-ஐயும் இங்கே enable செய்ய வேண்டும். Enable செய்தாலும் RJ ஒவ்வொரு செயலுக்கும் Confirm கேட்கும்.</Text>
+        {([
+          ["video.create", "Create video project"],
+          ["reminder.create", "Save reminder"],
+          ["navigation.open", "Open app screens"],
+        ] as [AgentToolKey, string][]).map(([key, label]) => (
+          <View key={key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9 }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={styles.listLine}>{label}</Text>
+              <Text style={styles.muted}>{agentPermissions[key] ? "Enabled · confirmation required" : "Disabled"}</Text>
+            </View>
+            <ActionButton title={agentPermissionBusy === key ? "Saving…" : agentPermissions[key] ? "Disable" : "Enable"} onPress={() => setAgentToolPermission(key, !agentPermissions[key])} disabled={agentPermissionBusy !== null} secondary={!agentPermissions[key]} />
+          </View>
+        ))}
+        <Text style={styles.note}>Every confirmed action is checked by the server and written to the audit log. New tools stay disabled until you enable them.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>RJ account</Text>
@@ -633,7 +843,7 @@ export default function App() {
         <ActionButton title="Sign out of RJ" onPress={signOut} secondary />
       </View>
       <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>Free AI story providers</Text>
+        <Text style={styles.sectionTitle}>AI providers & spending policy</Text>
         <Text style={styles.listLine}>Gemini: <Text style={providerStatus.gemini ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.gemini ? "Key stored securely" : "Not connected"}</Text></Text>
         <Pressable onPress={() => Linking.openURL("https://aistudio.google.com/apikey")}><Text style={{ color: RED, marginBottom: 10 }}>Get a free Gemini API key ↗</Text></Pressable>
         <Field label="Gemini API key" value={geminiKeyInput} onChangeText={setGeminiKeyInput} placeholder="Paste Gemini API key" secureTextEntry />
@@ -643,13 +853,28 @@ export default function App() {
         <Pressable onPress={() => Linking.openURL("https://openrouter.ai/settings/keys")}><Text style={{ color: RED, marginBottom: 10 }}>Get an OpenRouter API key ↗</Text></Pressable>
         <Field label="OpenRouter API key" value={openRouterKeyInput} onChangeText={setOpenRouterKeyInput} placeholder="Paste OpenRouter API key" secureTextEntry />
         <ActionButton title={providerBusy === "openrouter" ? "Saving…" : "Save OpenRouter key"} onPress={() => saveProviderKey("openrouter", openRouterKeyInput)} disabled={providerBusy !== null} />
-        <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses Gemini first, then OpenRouter's free-model router. Free-tier quotas apply; paid models are not called automatically.</Text>
+        <View style={styles.divider} />
+        <Text style={styles.listLine}>Groq Free: <Text style={providerStatus.groq ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.groq ? "Key stored securely" : "Not connected"}</Text></Text>
+        <Pressable onPress={() => Linking.openURL("https://console.groq.com/keys")}><Text style={{ color: RED, marginBottom: 10 }}>Get a Groq API key ↗</Text></Pressable>
+        <Field label="Groq Free API key" value={groqKeyInput} onChangeText={setGroqKeyInput} placeholder="Paste Groq API key" secureTextEntry />
+        <ActionButton title={providerBusy === "groq" ? "Saving…" : "Save Groq Free key"} onPress={() => saveProviderKey("groq", groqKeyInput)} disabled={providerBusy !== null} />
+        <View style={styles.divider} />
+        <Text style={styles.listLine}>Cloudflare Workers AI Free: <Text style={providerStatus.cloudflare ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.cloudflare ? "Credentials stored securely" : "Not connected"}</Text></Text>
+        <Pressable onPress={() => Linking.openURL("https://dash.cloudflare.com/profile/api-tokens")}><Text style={{ color: RED, marginBottom: 10 }}>Create a Cloudflare API token ↗</Text></Pressable>
+        <Field label="Cloudflare Account ID" value={cloudflareAccountInput} onChangeText={setCloudflareAccountInput} placeholder="Account ID" secureTextEntry />
+        <Field label="Cloudflare API token (Workers AI:Read)" value={cloudflareTokenInput} onChangeText={setCloudflareTokenInput} placeholder="Paste scoped API token" secureTextEntry />
+        <Pressable onPress={() => setCloudflareFreePlanConfirmed(value => !value)} style={{ paddingVertical: 10 }}>
+          <Text style={styles.listLine}>{cloudflareFreePlanConfirmed ? "☑" : "☐"} I confirm this Cloudflare account is on the Workers Free plan (not Workers Paid).</Text>
+        </Pressable>
+        <ActionButton title={providerBusy === "cloudflare" ? "Saving…" : "Save Cloudflare Free credentials"} onPress={() => saveProviderKey("cloudflare", cloudflareAccountInput.trim() + ":" + cloudflareTokenInput.trim())} disabled={providerBusy !== null || !cloudflareFreePlanConfirmed || cloudflareAccountInput.trim().length < 20 || cloudflareTokenInput.trim().length < 20} />
+        <Text style={styles.note}>IMPORTANT: Only connect this on Cloudflare Workers Free plan. Workers AI has 10,000 free Neurons/day there and hard-stops after the limit. Workers Paid accounts can be charged above the free quota; RJ will not use them. Keys are encrypted in Supabase Vault. If image quota is exhausted, RJ uses free local vector artwork.</Text>
+                <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses OpenRouter Free, then Groq Free for text; optional Cloudflare Workers AI is only for a confirmed Workers Free account. Tamil narration runs locally with Piper. Paid providers remain disabled.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Other connections</Text>
         <Text style={styles.listLine}>YouTube account: <Text style={styles.pending}>Not connected</Text></Text>
         <Text style={styles.listLine}>Cloud sync: <Text style={{ color: "#53C98B", fontWeight: "700" }}>Connected</Text></Text>
-        <Text style={styles.note}>YouTube OAuth, voice-over, visuals, subtitles and rendering are the next pipeline stages.</Text>
+        <Text style={styles.note}>YouTube OAuth, multi-channel publishing and scheduling are the remaining major pipeline stages.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>About RJ</Text>
@@ -723,13 +948,15 @@ export default function App() {
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
         {tab === "Home" && renderHome()}
         {tab === "Create" && renderCreate()}
+        {tab === "Edit" && <VideoEditorScreen projects={jobs} onSave={saveProjectEdits} />}
+        {tab === "Tools" && <ToolHubScreen geminiConnected={!!providerStatus.gemini} openRouterConnected={!!providerStatus.openrouter} onOpenSettings={() => setTab("Settings")} />}
         {tab === "Schedule" && renderSchedule()}
         {tab === "Settings" && renderSettings()}
       </ScrollView>
       <View style={styles.tabBar}>
-        {(["Home", "Create", "Schedule", "Settings"] as Tab[]).map(item => (
+        {(["Home", "Create", "Edit", "Tools", "Schedule", "Settings"] as Tab[]).map(item => (
           <Pressable key={item} onPress={() => setTab(item)} style={styles.tabItem}>
-            <Text style={[styles.tabIcon, tab === item && { color: RED }]}>{item === "Home" ? "⌂" : item === "Create" ? "＋" : item === "Schedule" ? "◷" : "⚙"}</Text>
+            <Text style={[styles.tabIcon, tab === item && { color: RED }]}>{item === "Home" ? "⌂" : item === "Create" ? "＋" : item === "Edit" ? "✎" : item === "Tools" ? "◇" : item === "Schedule" ? "◷" : "⚙"}</Text>
             <Text style={[styles.tabLabel, tab === item && { color: "#FFFFFF" }]}>{item}</Text>
             {tab === item && <View style={styles.tabUnderline} />}
           </Pressable>
