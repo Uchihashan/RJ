@@ -27,6 +27,12 @@ jobs:
         run: npx expo config --type public
       - name: Expo Doctor
         run: npx expo-doctor
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Check Supabase Edge Functions
+        run: deno check supabase/functions/rj-assistant/index.ts supabase/functions/rj-worker/index.ts
       - name: Export browser demo
         run: npx expo export --platform web
       - name: Upload private workflow artifact
