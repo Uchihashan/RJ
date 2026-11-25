@@ -21,8 +21,8 @@ Deno.test("paid routing still prefers compatible free providers", () => {
     allowPaidProviders: true,
     monthlyBudgetUsd: 5,
   });
-  if (selected.length !== 2 || selected[0].key !== "openrouter") {
-    throw new Error("Free compatible provider must be tried before account-dependent provider");
+  if (selected.length !== 1 || selected[0].key !== "openrouter") {
+    throw new Error("Account-dependent providers stay disabled until spend enforcement is implemented");
   }
 });
 
