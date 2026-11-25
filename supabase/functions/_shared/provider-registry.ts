@@ -59,7 +59,8 @@ export const PROVIDER_CATALOG: readonly ProviderSpec[] = [
     pricingMode: "account_dependent",
     outputFormats: ["text"],
     credentialKey: "gemini",
-    enabled: true,
+    // Disabled until RJ can measure and enforce a hard per-user spend limit.
+    enabled: false,
   },
 ];
 
