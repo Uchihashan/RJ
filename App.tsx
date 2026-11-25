@@ -25,7 +25,7 @@ type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
 type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean };
 
 function jobStatusLabel(row: any): string {
-  if (row.output?.stage === "story_ready") return "Story ready — voice and video steps next";
+  if (row.output?.stage === "story_ready") return "Story ready — voice, visuals and rendering still pending";
   if (row.status === "queued") return "Queued — RJ worker will check providers";
   if (row.status === "running") return "Generating story…";
   if (row.status === "waiting_retry") return "Provider busy — automatic retry scheduled";
@@ -447,7 +447,7 @@ export default function App() {
   const saveProjectEdits = async (id: string, nextTopic: string, nextStory: string, description: string, aspectRatio: string, captionsEnabled: boolean) => {
     const existing = jobs.find(job => job.id === id);
     setJobs(current => current.map(job => job.id === id
-      ? { ...job, topic: nextTopic, story: nextStory, description, aspectRatio, captionsEnabled, status: "Edits saved — ready for rendering" }
+      ? { ...job, topic: nextTopic, story: nextStory, description, aspectRatio, captionsEnabled, status: "Edits saved — render provider not connected" }
       : job));
     if (session && supabase && existing && /^[0-9a-f-]{36}$/i.test(id)) {
       const { error } = await supabase.rpc("rj_update_video_project", {
@@ -471,7 +471,7 @@ export default function App() {
       Alert.alert("Reminder needed", "Enter what you want RJ to remind you about.");
       return;
     }
-    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(scheduleTime)) {
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(reminderTime)) {
       Alert.alert("Time not valid", "Use 24-hour format, for example 18:30.");
       return;
     }
