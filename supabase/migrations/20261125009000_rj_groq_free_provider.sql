@@ -6,7 +6,7 @@ alter table private.rj_provider_credentials
 
 alter table private.rj_provider_credentials
   add constraint rj_provider_credentials_provider_check
-  check (provider in ('gemini', 'openrouter', 'groq'));
+  check (provider in ('gemini', 'openrouter', 'groq', 'cloudflare'));
 
 create or replace function public.rj_store_provider_key(p_provider text, p_api_key text)
 returns boolean
@@ -20,7 +20,7 @@ declare
   v_secret_name text;
 begin
   if v_user_id is null then raise exception 'Authentication required'; end if;
-  if p_provider not in ('gemini', 'openrouter', 'groq') then raise exception 'Unsupported provider'; end if;
+  if p_provider not in ('gemini', 'openrouter', 'groq', 'cloudflare') then raise exception 'Unsupported provider'; end if;
   if p_api_key is null or length(btrim(p_api_key)) < 20 or length(btrim(p_api_key)) > 512 then
     raise exception 'API key length is invalid';
   end if;
@@ -56,7 +56,7 @@ as $$
            select 1 from private.rj_provider_credentials c
            where c.user_id = auth.uid() and c.provider = p.provider
          ) as configured
-  from (values ('gemini'::text), ('openrouter'::text), ('groq'::text)) p(provider);
+  from (values ('gemini'::text), ('openrouter'::text), ('groq'::text), ('cloudflare'::text)) p(provider);
 $$;
 
 create or replace function public.rj_get_provider_keys(p_user_id uuid)
@@ -117,3 +117,10 @@ update public.provider_capability_catalog
 set availability = 'available',
     notes = 'Use only with a Groq Free-tier organization and never upgrade to Developer/PayGo. RJ falls back on free-tier quota responses.'
 where provider_key = 'groq_free' and capability = 'text' and model_key = 'openai/gpt-oss-20b';
+
+
+update public.provider_capability_catalog
+set availability = 'available',
+    notes = 'Cloudflare Workers AI FLUX.1 schnell. Configure only on Cloudflare Workers Free plan; daily free quota returns 429 and requests stop. Never use a Workers Paid account.'
+where provider_key = 'cloudflare_flux_schnell' and capability = 'image'
+  and model_key = '@cf/black-forest-labs/flux-1-schnell';
