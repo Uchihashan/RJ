@@ -140,3 +140,37 @@ Each stage stores inputs, outputs, provider, attempt history, timestamps, and re
 5. End-to-end media rendering and verification.
 
 Acceptance tests must include: provider A returns 429 and provider B completes the same stage; all providers unavailable then job resumes after cooldown; app is force-closed and a scheduled job still runs; two channels receive only their own assigned videos; duplicate cron/worker invocations do not create duplicate uploads; a render completed early is published at the requested local time; a deadline cannot be met and RJ reports it rather than claiming success; and no paid fallback runs without prior consent.
+
+
+## Implementation status — 2026-11-25
+
+This status supersedes earlier audit bullets where they conflict.
+
+### Implemented on `feature/rj-full-integration`
+- Authenticated Tamil/Tanglish/English assistant request/response gateway using Gemini with OpenRouter fallback.
+- Per-user provider keys are retrieved server-side through the existing Vault RPC; keys are not bundled in the app.
+- Local app actions for video-project creation, reminder creation, and tab navigation require an explicit confirmation card.
+- Tamil/Tanglish aliases for the supported video/reminder commands; a new message cancels an older unconfirmed action.
+- Video project queue and first story-generation worker stage.
+- Durable pipeline-stage schema and initial stage records; worker marks the brief and story stages, then explicitly blocks at scene-assets when no compatible media-generation adapter is connected.
+- Agent permission and action-audit schema.
+- Browser-only private CI artifact workflow; no public web deployment.
+- Reminder validation uses the requested reminder time, not the screen's default time.
+
+### Still not implemented / not verified
+- The permission and audit tables are schema only; the app/Edge Function does not yet enforce or write every action through them.
+- Capability-aware adapters and provider selection for image, video, speech, captioning, rendering, storage, and YouTube are not complete.
+- No end-to-end playable video renderer or media asset pipeline exists yet.
+- No YouTube OAuth connection, multi-channel token management, upload, scheduled publishing, or verification flow exists yet.
+- No separate long-running media worker has been deployed. The current Supabase worker handles the story stage only.
+- Stage progress is persisted, but the full stage runner, retry/resume behavior per media stage, cancellation, and end-to-end acceptance tests remain outstanding.
+- Supabase migrations in this branch have not been applied to the hosted RJ project. Worker code that writes `job_stages` requires the autonomous-operations migration to be applied before that worker version is deployed.
+- No production Edge Function deployment, Render deployment, `main` merge, or APK build has been performed.
+
+### External prerequisites for actual full video publishing
+- A supported, authorized video-generation provider and its credentials. Google Flow is a consumer studio, not assumed to expose a public app API; use a documented Google Cloud/Gemini video API adapter only where the account, region, model, and billing permit it.
+- A speech/TTS provider, rendering runtime, and storage bucket with sufficient capacity.
+- Google OAuth client configuration and YouTube Data API project approval/quota for each channel owner. Refresh tokens must remain server-side and encrypted.
+- Explicit per-user paid-provider budget approval before any non-free generation or rendering is attempted.
+
+Do not describe RJ as a completed autonomous video publisher until the remaining items above are implemented, deployed with approval, and end-to-end tested.
