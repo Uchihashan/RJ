@@ -362,19 +362,21 @@ async function processJob(message: QueueMessage) {
       if (!topicValidation.ok) {
         throw Object.assign(
           new Error("Story did not follow the requested topic. Missing: " + topicValidation.missingAnchors.join(", ")),
-          { status: 422 },
+          { status: 422, code: "story_topic_mismatch" },
         );
       }
     } catch (error) {
       const failure = classifyProviderFailure(error);
-      failures.push(failure);
+      const topicMismatch = typeof error === "object" && error !== null
+        && "code" in error && (error as { code?: string }).code === "story_topic_mismatch";
+      failures.push(topicMismatch ? { ...failure, code: "story_topic_mismatch", retryable: false } : failure);
       const cooldown = cooldownUntil(failure, failures.length);
       const { error: healthUpdateError } = await admin.from("provider_health").upsert({
         user_id: userId, provider_key: provider.key, capability: "text",
-        state: cooldown ? "cooldown" : "needs_attention",
-        cooldown_until: cooldown,
+        state: topicMismatch ? "available" : cooldown ? "cooldown" : "needs_attention",
+        cooldown_until: topicMismatch ? null : cooldown,
         last_http_status: failure.status,
-        last_error_code: failure.code,
+        last_error_code: topicMismatch ? "story_topic_mismatch" : failure.code,
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id,provider_key,capability" });
       if (healthUpdateError) throw healthUpdateError;
@@ -386,9 +388,9 @@ async function processJob(message: QueueMessage) {
       }).eq("id", attempt.id);
       if (failureUpdateError) throw failureUpdateError;
       const { error: providerAttemptUpdateError } = await admin.from("provider_attempts").update({
-        status: failure.quota ? "quota_exhausted" : failure.status === 429 ? "rate_limited" : failure.retryable ? "failed" : "needs_attention",
+        status: topicMismatch ? "needs_attention" : failure.quota ? "quota_exhausted" : failure.status === 429 ? "rate_limited" : failure.retryable ? "failed" : "needs_attention",
         http_status: failure.status,
-        error_code: failure.code,
+        error_code: topicMismatch ? "story_topic_mismatch" : failure.code,
         safe_error_message: failure.message,
         finished_at: new Date().toISOString(),
       }).eq("id", providerAttempt.id);
