@@ -142,6 +142,59 @@ async function loadCloudflareCredential(db: SupabaseClient, userId: string): Pro
   return typeof row?.api_key === "string" ? row.api_key : null;
 }
 
+async function cloudflareImageCoolingDown(db: SupabaseClient, userId: string): Promise<boolean> {
+  const now = Date.now();
+  const { data: daily, error: dailyError } = await db.from("provider_attempts")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("provider_key", "cloudflare_flux_schnell")
+    .eq("error_code", "daily_free_quota_exhausted")
+    .gte("created_at", new Date(now - 24 * 60 * 60_000).toISOString())
+    .limit(1);
+  if (dailyError) throw dailyError;
+  if ((daily ?? []).length) return true;
+  const { data: limited, error: limitedError } = await db.from("provider_attempts")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("provider_key", "cloudflare_flux_schnell")
+    .eq("error_code", "rate_limited")
+    .gte("created_at", new Date(now - 30 * 60_000).toISOString())
+    .limit(1);
+  if (limitedError) throw limitedError;
+  return (limited ?? []).length > 0;
+}
+
+async function recordCloudflareFailure(
+  db: SupabaseClient,
+  job: JobRow,
+  error: unknown,
+) {
+  const status = typeof error === "object" && error !== null && "status" in error
+    ? Number((error as { status: unknown }).status)
+    : null;
+  const providerCode = typeof error === "object" && error !== null && "providerCode" in error
+    ? Number((error as { providerCode: unknown }).providerCode)
+    : null;
+  const dailyQuota = providerCode === 3036;
+  const rateLimited = status === 429;
+  const errorCode = dailyQuota ? "daily_free_quota_exhausted" : rateLimited ? "rate_limited" : "provider_unavailable";
+  const { error: insertError } = await db.from("provider_attempts").insert({
+    user_id: job.user_id,
+    job_id: job.id,
+    stage_key: "scene_assets",
+    capability: "image",
+    provider_key: "cloudflare_flux_schnell",
+    model_key: "@cf/black-forest-labs/flux-1-schnell",
+    attempt_number: 1,
+    status: dailyQuota ? "quota_exhausted" : rateLimited ? "rate_limited" : "failed",
+    http_status: Number.isFinite(status) ? status : null,
+    error_code: errorCode,
+    safe_error_message: error instanceof Error ? error.message.slice(0, 300) : "Cloudflare image request failed",
+    finished_at: new Date().toISOString(),
+  });
+  if (insertError) log("provider_attempt_log_failed", { job_id: job.id, provider: "cloudflare_flux_schnell", error: insertError.message.slice(0, 180) });
+}
+
 async function generateCloudflareImage(credential: string, prompt: string): Promise<Buffer> {
   const separator = credential.indexOf(":");
   if (separator < 10) throw new Error("Cloudflare credential must contain Account ID and API token");
@@ -159,7 +212,7 @@ async function generateCloudflareImage(credential: string, prompt: string): Prom
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body?.success === false) {
       const message = body?.errors?.[0]?.message ?? body?.result?.error ?? "Cloudflare image request failed";
-      throw Object.assign(new Error(String(message)), { status: response.status });
+      throw Object.assign(new Error(String(message)), { status: response.status, providerCode: body?.errors?.[0]?.code ?? null });
     }
     const encoded = body?.result?.image ?? body?.image;
     if (typeof encoded !== "string" || encoded.length < 100) {
@@ -227,6 +280,15 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
       log("cloudflare_credential_unavailable", { job_id: job.id, error: error instanceof Error ? error.message.slice(0, 180) : "credential lookup failed" });
     }
     let imageProviderAvailable = Boolean(cloudflareCredential);
+    if (imageProviderAvailable) {
+      try {
+        imageProviderAvailable = !(await cloudflareImageCoolingDown(db, job.user_id));
+        if (!imageProviderAvailable) log("cloudflare_image_cooldown_active", { job_id: job.id });
+      } catch (error) {
+        imageProviderAvailable = false;
+        log("cloudflare_cooldown_check_failed", { job_id: job.id, error: error instanceof Error ? error.message.slice(0, 180) : "cooldown lookup failed" });
+      }
+    }
     let imageCount = 0;
     const pngPaths: string[] = [];
     for (let index = 0; index < scenes.length; index += 1) {
@@ -243,6 +305,7 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
         } catch (error) {
           const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: unknown }).status) : null;
           imageProviderAvailable = false;
+          await recordCloudflareFailure(db, job, error);
           log("cloudflare_image_fallback", {
             job_id: job.id,
             scene: index + 1,
