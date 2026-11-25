@@ -57,6 +57,19 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Only a completed rendered video can be uploaded." }, 409);
     }
     if (typeof render.youtube_video_id === "string" && render.youtube_video_id) {
+      const { data: existingChannel } = await admin.from("youtube_channels").select("id")
+        .eq("user_id", auth.user.id).eq("is_active", true)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (existingChannel?.id) {
+        await admin.rpc("rj_complete_youtube_upload", {
+          p_user_id: auth.user.id, p_channel_ref: existingChannel.id,
+          p_job_id: jobId, p_youtube_video_id: render.youtube_video_id,
+        });
+      }
+      await admin.from("job_stages").update({
+        status: "succeeded", output: { youtube_video_id: render.youtube_video_id, youtube_url: render.youtube_url, privacy_status: "private" },
+        error_code: null, error_message: null, finished_at: new Date().toISOString(),
+      }).eq("job_id", jobId).eq("user_id", auth.user.id).eq("stage_key", "youtube_upload");
       return json({ ok: true, video_id: render.youtube_video_id, video_url: render.youtube_url, already_uploaded: true });
     }
 
@@ -68,6 +81,12 @@ Deno.serve(async (req: Request) => {
     if (approvalError) throw approvalError;
     if (!approval) return json({ error: "Approve this exact video in RJ before uploading." }, 403);
     auditId = approval.id;
+
+    const { data: claimed, error: claimError } = await admin.rpc("rj_claim_job_stage", {
+      p_job_id: jobId, p_user_id: auth.user.id, p_stage_key: "youtube_upload", p_lease_seconds: 1800,
+    });
+    if (claimError) throw claimError;
+    if (claimed !== true) return json({ error: "This video is already being uploaded or the upload stage is not ready." }, 409);
 
     const { data: channel, error: channelError } = await admin.from("youtube_channels")
       .select("id").eq("user_id", auth.user.id).eq("is_active", true)
