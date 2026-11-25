@@ -91,6 +91,17 @@ Deno.test("invalid credentials do not trigger blind retries", () => {
   }
 });
 
+Deno.test("local Tamil Piper voices are ordered as free speech fallbacks", () => {
+  const selected = selectEligibleProviders("speech", new Map([["local_piper", "installed"]]), [], {
+    allowPaidProviders: false,
+    monthlyBudgetUsd: 0,
+  });
+  const names = selected.map((provider) => provider.key).join(",");
+  if (names !== "piper_tamil_rasa_female,piper_tamil_hemalatha") {
+    throw new Error("Local Piper Tamil voice models must be the free speech primary and fallback");
+  }
+});
+
 Deno.test("speech adapter remains disabled until spend enforcement exists", () => {
   const keys = new Map([["gemini", "secret"]]);
   const selected = selectEligibleProviders("speech", keys, [], {
