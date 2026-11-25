@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import {
+  buildSceneOverlaySvg,
   buildSceneSvg,
   buildSrt,
   sceneDurationSeconds,
@@ -48,9 +49,11 @@ function log(event: string, details: Record<string, unknown> = {}) {
   console.log(JSON.stringify({ service: "rj-renderer", event, at: new Date().toISOString(), ...details }));
 }
 
-async function runCommand(command: string, args: string[], cwd: string): Promise<string> {
+async function runCommand(command: string, args: string[], cwd: string, stdinText?: string): Promise<string> {
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    if (stdinText !== undefined) child.stdin.end(stdinText);
+    else child.stdin.end();
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -132,12 +135,83 @@ async function storyStageIsReady(db: SupabaseClient, jobId: string): Promise<boo
   return data?.status === "succeeded";
 }
 
-async function renderStoryboard(job: JobRow): Promise<{
+async function loadCloudflareCredential(db: SupabaseClient, userId: string): Promise<string | null> {
+  const { data, error } = await db.rpc("rj_get_provider_keys", { p_user_id: userId });
+  if (error) throw error;
+  const row = (data ?? []).find((item: { provider: string; api_key: string }) => item.provider === "cloudflare");
+  return typeof row?.api_key === "string" ? row.api_key : null;
+}
+
+async function generateCloudflareImage(credential: string, prompt: string): Promise<Buffer> {
+  const separator = credential.indexOf(":");
+  if (separator < 10) throw new Error("Cloudflare credential must contain Account ID and API token");
+  const accountId = credential.slice(0, separator);
+  const token = credential.slice(separator + 1);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90_000);
+  try {
+    const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, steps: 4 }),
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.success === false) {
+      const message = body?.errors?.[0]?.message ?? body?.result?.error ?? "Cloudflare image request failed";
+      throw Object.assign(new Error(String(message)), { status: response.status });
+    }
+    const encoded = body?.result?.image ?? body?.image;
+    if (typeof encoded !== "string" || encoded.length < 100) {
+      throw Object.assign(new Error("Cloudflare returned no image data"), { status: 502 });
+    }
+    return Buffer.from(encoded, "base64");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const PIPER_BIN = "/opt/piper-venv/bin/piper";
+const PIPER_VOICES = [
+  { key: "piper_tamil_rasa_female", model: "/opt/piper-models/rasa.onnx", config: "/opt/piper-models/rasa.onnx.json" },
+  { key: "piper_tamil_hemalatha", model: "/opt/piper-models/hemalatha.onnx", config: "/opt/piper-models/hemalatha.onnx.json" },
+] as const;
+
+function isTamilStory(job: JobRow, story: string): boolean {
+  const language = String(job.input?.language ?? job.input?.lang ?? "").toLowerCase();
+  return /[\u0B80-\u0BFF]/.test(story) || language.includes("tamil") || language === "ta" || language.startsWith("ta-");
+}
+
+async function synthesizeTamilScene(text: string, outputPath: string, workDir: string): Promise<string> {
+  let lastError: unknown;
+  for (const voice of PIPER_VOICES) {
+    try {
+      await runCommand(PIPER_BIN, [
+        "--model", voice.model,
+        "--config", voice.config,
+        "--output_file", outputPath,
+      ], workDir, text);
+      const stat = await readFile(outputPath);
+      if (stat.length < 1_000) throw new Error("Piper generated an empty voice file");
+      return voice.key;
+    } catch (error) {
+      lastError = error;
+      log("piper_voice_fallback", { failed_voice: voice.key, error: error instanceof Error ? error.message.slice(0, 180) : "voice synthesis failed" });
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("No local Tamil Piper voice could synthesize this scene");
+}
+
+async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
   mp4: Buffer;
   thumbnail: Buffer;
   captions: string;
+  narration: Buffer | null;
+  voiceModel: string | null;
   sceneCount: number;
   durationSeconds: number;
+  visualMode: string;
+  imageCount: number;
 }> {
   const story = typeof job.output?.story === "string" ? job.output.story : "";
   if (!story) throw new Error("The story stage has no saved story text");
@@ -146,37 +220,116 @@ async function renderStoryboard(job: JobRow): Promise<{
   const scenes = splitStoryIntoScenes(story);
   const workDir = await mkdtemp(join(tmpdir(), "rj-render-"));
   try {
+    let cloudflareCredential: string | null = null;
+    try {
+      cloudflareCredential = await loadCloudflareCredential(db, job.user_id);
+    } catch (error) {
+      log("cloudflare_credential_unavailable", { job_id: job.id, error: error instanceof Error ? error.message.slice(0, 180) : "credential lookup failed" });
+    }
+    let imageProviderAvailable = Boolean(cloudflareCredential);
+    let imageCount = 0;
     const pngPaths: string[] = [];
     for (let index = 0; index < scenes.length; index += 1) {
       const scene = scenes[index]!;
-      const svg = buildSceneSvg({
-        title: scene.title,
-        topic,
-        body: scene.text,
-        index,
-        total: scenes.length,
-      });
       const pngPath = join(workDir, `scene-${String(index + 1).padStart(2, "0")}.png`);
-      await sharp(Buffer.from(svg)).png().toFile(pngPath);
+      let generatedImage: Buffer | null = null;
+      if (imageProviderAvailable && cloudflareCredential) {
+        try {
+          generatedImage = await generateCloudflareImage(
+            cloudflareCredential,
+            `A beautiful child-safe cinematic storybook illustration, wide landscape composition, no text, no letters, no watermark. Story topic: ${topic}. Scene: ${scene.title}. Visual description: ${scene.text.slice(0, 700)}. Warm expressive characters, detailed environment, polished 3D animated film look.`,
+          );
+          imageCount += 1;
+        } catch (error) {
+          const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: unknown }).status) : null;
+          imageProviderAvailable = false;
+          log("cloudflare_image_fallback", {
+            job_id: job.id,
+            scene: index + 1,
+            status,
+            reason: status === 429 ? "free_daily_quota_or_rate_limit" : "provider_unavailable",
+          });
+        }
+      }
+      if (generatedImage) {
+        const overlay = Buffer.from(buildSceneOverlaySvg({
+          title: scene.title, topic, body: scene.text, index, total: scenes.length,
+        }));
+        await sharp(generatedImage)
+          .resize(1280, 720, { fit: "cover", position: "attention" })
+          .composite([{ input: overlay }])
+          .jpeg({ quality: 88 })
+          .toFile(pngPath);
+      } else {
+        const svg = buildSceneSvg({
+          title: scene.title, topic, body: scene.text, index, total: scenes.length,
+        });
+        await sharp(Buffer.from(svg)).png().toFile(pngPath);
+      }
       pngPaths.push(pngPath);
     }
 
+    let narration: Buffer | null = null;
+    let voiceModel: string | null = null;
+    let sceneDurations = scenes.map(sceneDurationSeconds);
+    if (isTamilStory(job, story)) {
+      try {
+        const audioPaths: string[] = [];
+        const audioDurations: number[] = [];
+        const usedVoices: string[] = [];
+        for (let index = 0; index < scenes.length; index += 1) {
+          const audioPath = join(workDir, `voice-${String(index + 1).padStart(2, "0")}.wav`);
+          const usedVoice = await synthesizeTamilScene(scenes[index]!.text, audioPath, workDir);
+          const duration = Number.parseFloat(await runCommand("ffprobe", [
+            "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", audioPath,
+          ], workDir));
+          if (!Number.isFinite(duration) || duration <= 0) throw new Error("Piper audio duration is invalid");
+          audioPaths.push(audioPath);
+          audioDurations.push(duration);
+          usedVoices.push(usedVoice);
+        }
+        const audioConcat = audioPaths.map(path => `file '${path}'`).join("\n") + "\n";
+        await writeFile(join(workDir, "voice.txt"), audioConcat, "utf8");
+        const narrationPath = join(workDir, "narration.wav");
+        await runCommand("ffmpeg", [
+          "-hide_banner", "-loglevel", "error", "-y",
+          "-f", "concat", "-safe", "0", "-i", join(workDir, "voice.txt"),
+          "-c:a", "pcm_s16le", narrationPath,
+        ], workDir);
+        narration = await readFile(narrationPath);
+        sceneDurations = audioDurations.map(duration => duration + 0.15);
+        voiceModel = [...new Set(usedVoices)].join("+");
+      } catch (error) {
+        narration = null;
+        voiceModel = null;
+        sceneDurations = scenes.map(sceneDurationSeconds);
+        log("local_tamil_voice_unavailable", { job_id: job.id, error: error instanceof Error ? error.message.slice(0, 250) : "Piper synthesis failed" });
+      }
+    }
+
     const concatLines = pngPaths.map((path, index) =>
-      `file '${path}'\nduration ${sceneDurationSeconds(scenes[index]!)}`
+      `file '${path}'\nduration ${sceneDurations[index]}`
     );
     if (pngPaths.length) concatLines.push(`file '${pngPaths[pngPaths.length - 1]}'`);
     await writeFile(join(workDir, "scenes.txt"), concatLines.join("\n") + "\n", "utf8");
 
     const mp4Path = join(workDir, "storyboard.mp4");
-    await runCommand("ffmpeg", [
+    const ffmpegArgs = [
       "-hide_banner", "-loglevel", "error", "-y",
       "-f", "concat", "-safe", "0", "-i", join(workDir, "scenes.txt"),
+    ];
+    if (narration) ffmpegArgs.push("-i", join(workDir, "narration.wav"));
+    ffmpegArgs.push(
       "-r", "30",
       "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
       "-movflags", "+faststart",
-      mp4Path,
-    ], workDir);
+    );
+    if (narration) ffmpegArgs.push("-map", "0:v:0", "-map", "1:a:0", "-af", "apad", "-c:a", "aac", "-b:a", "128k", "-shortest");
+    else ffmpegArgs.push("-an");
+    ffmpegArgs.push(mp4Path);
+    await runCommand("ffmpeg", ffmpegArgs, workDir);
 
     const probe = await runCommand("ffprobe", [
       "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", mp4Path,
@@ -193,9 +346,13 @@ async function renderStoryboard(job: JobRow): Promise<{
     return {
       mp4,
       thumbnail,
-      captions: buildSrt(scenes),
+      captions: buildSrt(scenes, sceneDurations),
+      narration,
+      voiceModel,
       sceneCount: scenes.length,
       durationSeconds,
+      visualMode: imageCount ? "cloudflare_flux_schnell_with_vector_fallback" : "vector_story_cards",
+      imageCount,
     };
   } finally {
     await rm(workDir, { recursive: true, force: true });
@@ -234,39 +391,43 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
       return "story_missing";
     }
 
-    const result = await renderStoryboard(job);
+    const result = await renderStoryboard(db, job);
     const basePath = `${job.user_id}/${job.id}`;
     const videoPath = `${basePath}/storyboard.mp4`;
     const thumbnailPath = `${basePath}/thumbnail.jpg`;
     const captionsPath = `${basePath}/captions.srt`;
+    const narrationPath = result.narration ? `${basePath}/narration.wav` : null;
 
     await uploadAsset(db, videoPath, result.mp4, "video/mp4");
     await uploadAsset(db, thumbnailPath, result.thumbnail, "image/jpeg");
     await uploadAsset(db, captionsPath, result.captions, "application/x-subrip");
+    if (result.narration && narrationPath) await uploadAsset(db, narrationPath, result.narration, "audio/wav");
 
     const now = new Date().toISOString();
     await updateStage(db, job.id, "scene_assets", {
       status: "succeeded",
-      selected_provider: "rj_vector_story_cards",
+      selected_provider: result.imageCount ? "cloudflare_flux_schnell" : "rj_vector_story_cards",
       output: {
-        asset_kind: "vector_story_cards",
+        asset_kind: result.visualMode,
+        generated_image_count: result.imageCount,
         scene_count: result.sceneCount,
-        note: "No paid image-generation API was called. These are generated text-led scene cards, not AI photographs or illustrations.",
+        note: result.imageCount ? "Free-tier Cloudflare FLUX illustrations were generated where available; remaining scenes use local vector fallback. No paid provider is used." : "Cloudflare Free image generation was unavailable or not configured; local vector story cards were used. No paid provider is used.",
       },
       finished_at: now,
       error_code: null,
       error_message: null,
     });
     await updateStage(db, job.id, "voice_audio", {
-      status: "skipped",
-      output: { narration: "not_generated", reason: "No approved speech provider is enabled." },
-      error_code: "speech_provider_disabled",
-      error_message: "Video was rendered without narration; no speech API was called.",
+      status: result.narration ? "succeeded" : "skipped",
+      selected_provider: result.voiceModel ?? undefined,
+      output: result.narration ? { narration: "generated_locally", voice_model: result.voiceModel, bucket: BUCKET, path: narrationPath, license: "Piper Tamil model licenses documented in renderer README" } : { narration: "not_generated", reason: "No compatible local Tamil voice was available or the story was not Tamil." },
+      error_code: result.narration ? null : "local_voice_unavailable_or_not_tamil",
+      error_message: result.narration ? null : "No paid speech API was called; the video remains silent.",
       finished_at: now,
     });
     await updateStage(db, job.id, "captions", {
       status: "succeeded",
-      output: { bucket: BUCKET, path: captionsPath, timing: "scene-card timing; not speech-aligned" },
+      output: { bucket: BUCKET, path: captionsPath, timing: result.narration ? "scene-level speech duration alignment" : "scene-card timing; not speech-aligned" },
       finished_at: now,
       error_code: null,
       error_message: null,
@@ -274,7 +435,7 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
     await updateStage(db, job.id, "timeline_edit", {
       status: "succeeded",
       selected_provider: "ffmpeg",
-      output: { codec: "h264", width: 1280, height: 720, fps: 30, audio: false },
+      output: { codec: "h264", width: 1280, height: 720, fps: 30, audio: Boolean(result.narration), audio_codec: result.narration ? "aac" : null },
       finished_at: now,
       error_code: null,
       error_message: null,
@@ -287,6 +448,7 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
         video_path: videoPath,
         thumbnail_path: thumbnailPath,
         captions_path: captionsPath,
+        narration_path: narrationPath,
         duration_seconds: result.durationSeconds,
         file_size_bytes: result.mp4.length,
         mime_type: "video/mp4",
@@ -336,9 +498,12 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
           duration_seconds: result.durationSeconds,
           file_size_bytes: result.mp4.length,
           scene_count: result.sceneCount,
-          visual_mode: "vector_story_cards",
-          narration: "not_generated",
-          audio: false,
+          visual_mode: result.visualMode,
+          generated_image_count: result.imageCount,
+          narration: result.narration ? "generated_locally" : "not_generated",
+          voice_model: result.voiceModel,
+          narration_path: narrationPath,
+          audio: Boolean(result.narration),
           youtube_status: "not_connected",
         },
         rendered_at: now,
@@ -354,7 +519,9 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
       scene_count: result.sceneCount,
       duration_seconds: result.durationSeconds,
       file_size_bytes: result.mp4.length,
-      narration: false,
+      narration: Boolean(result.narration),
+      voice_model: result.voiceModel,
+      generated_image_count: result.imageCount,
     });
     return "rendered";
   } catch (error) {
