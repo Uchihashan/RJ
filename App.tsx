@@ -343,6 +343,7 @@ export default function App() {
         user_id: session.user.id,
         job_type: "video_generation",
         status: "queued",
+        idempotency_key: "video_generation:" + session.user.id + ":" + Date.now().toString(),
         input: { topic: clean, language: projectLanguage, stage: "queued" }
       }).select("id").single();
       if (data?.id) item.id = data.id;
