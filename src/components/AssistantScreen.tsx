@@ -21,7 +21,7 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
-  const canSend = useMemo(() => !!draft.trim() && !busy, [draft, busy]);
+  const canSend = useMemo(() => !!draft.trim() && !busy && !actionBusy, [draft, busy, actionBusy]);
 
   useEffect(() => {
     let active = true;
@@ -125,7 +125,7 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
             <Text style={styles.heading}>Talk to RJ</Text>
             <Text style={styles.sub}>Tamil • Tanglish • English · Gemini first, OpenRouter fallback</Text>
           </View>
-          <Pressable accessibilityRole="button" onPress={clearChat} disabled={busy} style={styles.clearButton}>
+          <Pressable accessibilityRole="button" onPress={clearChat} disabled={busy || actionBusy} style={styles.clearButton}>
             <Text style={styles.clearText}>CLEAR CHAT</Text>
           </Pressable>
         </View>
@@ -156,7 +156,7 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
           placeholderTextColor="#777"
           multiline
           style={styles.input}
-          editable={!busy}
+          editable={!busy && !actionBusy}
         />
         <Pressable accessibilityRole="button" onPress={send} disabled={!canSend} style={[styles.send, !canSend && { opacity: 0.45 }]}>
           <Text style={styles.sendText}>{busy ? "..." : "SEND"}</Text>
