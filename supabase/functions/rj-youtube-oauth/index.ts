@@ -143,7 +143,7 @@ async function finishOAuth(url: URL) {
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
-  if (req.method === "GET" && url.searchParams.has("code")) return await finishOAuth(url);
+  if (req.method === "GET" && (url.searchParams.has("code") || url.searchParams.has("error"))) return await finishOAuth(url);
   if (req.method !== "POST") return json({ error:"Use POST to begin YouTube connection." }, 405);
   return await startOAuth(req);
 });
