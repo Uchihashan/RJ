@@ -74,6 +74,28 @@ export const PROVIDER_CATALOG: readonly ProviderSpec[] = [
     // Keep disabled until RJ can enforce project-tier and per-request spend controls.
     enabled: false,
   },
+  {
+    key: "gemini_image",
+    label: "Google Gemini Flash Lite Image",
+    capability: "image",
+    model: "gemini-3.1-flash-lite-image",
+    pricingMode: "paid",
+    outputFormats: ["image/png", "image/jpeg"],
+    credentialKey: "gemini",
+    // Official pricing currently lists no free tier for image generation.
+    enabled: false,
+  },
+  {
+    key: "gemini_video",
+    label: "Google Gemini Omni Flash Video",
+    capability: "video",
+    model: "gemini-omni-1.1-flash",
+    pricingMode: "paid",
+    outputFormats: ["video/mp4"],
+    credentialKey: "gemini",
+    // Official pricing currently lists this model on the paid tier only.
+    enabled: false,
+  },
 ];
 
 export type RoutingPolicy = {
