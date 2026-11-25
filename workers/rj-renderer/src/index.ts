@@ -506,10 +506,12 @@ async function uploadPrivateYoutubeVideo(accessToken: string, video: Buffer, tit
     const detail = await init.text().catch(() => "");
     throw new Error("YouTube upload session could not be created (" + init.status + "): " + detail.slice(0, 300));
   }
+  const uploadBody = new ArrayBuffer(video.length);
+  new Uint8Array(uploadBody).set(video);
   const uploaded = await fetch(uploadUrl, {
     method: "PUT",
     headers: { "Content-Type": "video/mp4", "Content-Length": String(video.length) },
-    body: video,
+    body: uploadBody,
   });
   const body = await uploaded.json().catch(() => ({}));
   if (!uploaded.ok || typeof body.id !== "string") {
@@ -525,7 +527,9 @@ async function processYoutubeUpload(db: SupabaseClient, stage: StageRow): Promis
   let channelRef = "";
   try {
     const job = await loadJob(db, stage);
-    if (!job || job.status !== "completed" || typeof job.output?.render?.video_path !== "string") {
+    const jobOutput = (job?.output ?? {}) as Record<string, any>;
+    const render = (jobOutput.render ?? {}) as Record<string, any>;
+    if (!job || job.status !== "completed" || typeof render.video_path !== "string") {
       await updateStage(db, stage.job_id, "youtube_upload", {
         status: "blocked", error_code: "render_not_ready",
         error_message: "The rendered video is not ready to upload.",
@@ -561,7 +565,6 @@ async function processYoutubeUpload(db: SupabaseClient, stage: StageRow): Promis
     }
     channelRef = channel.id;
 
-    const render = job.output?.render ?? {};
     const alreadyUploaded = typeof render.youtube_video_id === "string" ? render.youtube_video_id : "";
     if (alreadyUploaded) {
       const { error: completeError } = await db.rpc("rj_complete_youtube_upload", {
@@ -606,7 +609,7 @@ async function processYoutubeUpload(db: SupabaseClient, stage: StageRow): Promis
     const videoId = await uploadPrivateYoutubeVideo(accessToken, video, title, description);
 
     const updatedOutput = {
-      ...job.output,
+      ...jobOutput,
       render: { ...render, youtube_video_id: videoId, youtube_url: "https://www.youtube.com/watch?v=" + videoId, youtube_status: "uploaded_private" },
     };
     const { error: saveError } = await db.from("jobs").update({
