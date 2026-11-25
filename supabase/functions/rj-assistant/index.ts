@@ -133,9 +133,17 @@ Deno.serve(async (req: Request) => {
   const { data: authData, error: authError } = await admin.auth.getUser(token);
   if (authError || !authData.user) return json({ error: "Your RJ session is invalid. Please sign in again." }, 401);
 
-  let input: { messages?: ChatMessage[] };
+  let input: { messages?: ChatMessage[]; context?: { rendered_projects?: Array<{ id?: string; topic?: string }> } };
   try { input = await req.json(); } catch { return json({ error: "Invalid request body." }, 400); }
   const messages = Array.isArray(input.messages) ? input.messages : [];
+  const rawProjects = input.context && Array.isArray(input.context.rendered_projects) ? input.context.rendered_projects : [];
+  const context: AgentContext = {
+    rendered_projects: rawProjects.filter(project => typeof project?.id === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(project.id)
+      && typeof project?.topic === "string")
+      .slice(0, 10)
+      .map(project => ({ id: project.id as string, topic: (project.topic as string).slice(0, 120) })),
+  };
   if (!messages.length || messages.length > 24) return json({ error: "Send between 1 and 24 chat messages." }, 400);
   const clean = messages.map((m) => ({
     role: m?.role === "assistant" ? "assistant" as const : "user" as const,
@@ -191,11 +199,12 @@ Deno.serve(async (req: Request) => {
     if (attemptError) return json({ error: "RJ could not record provider attempt." }, 503);
 
     try {
-      const reply = provider.key === "gemini"
-        ? await callGemini(keys.get("gemini")!, clean)
+      const rawReply = provider.key === "gemini"
+        ? await callGemini(keys.get("gemini")!, clean, context)
         : provider.key === "groq_free"
-          ? await callGroqFree(keys.get("groq")!, clean)
-          : await callOpenRouter(keys.get("openrouter")!, clean);
+          ? await callGroqFree(keys.get("groq")!, clean, context)
+          : await callOpenRouter(keys.get("openrouter")!, clean, context);
+      const parsedReply = parseAgentOutput(rawReply, context);
       const now = new Date().toISOString();
       await admin.from("provider_health").upsert({
         user_id: authData.user.id, provider_key: provider.key, capability: "text",
@@ -205,7 +214,7 @@ Deno.serve(async (req: Request) => {
       await admin.from("provider_attempts").update({
         status: "succeeded", http_status: 200, finished_at: now,
       }).eq("id", attempt.id);
-      return json({ reply, provider: provider.label });
+      return json({ reply: parsedReply.reply, action: parsedReply.action, provider: provider.label });
     } catch (error) {
       const failure = classifyProviderFailure(error);
       failures.push(provider.label + ": " + failure.message);
