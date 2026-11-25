@@ -94,7 +94,7 @@ async function loadReadyStages(db: SupabaseClient): Promise<StageRow[]> {
   const { data, error } = await db.from("job_stages")
     .select("job_id,user_id,stage_key,attempt_count")
     .eq("stage_key", "scene_assets")
-    .in("status", ["pending", "queued", "waiting_retry"])
+    .in("status", ["pending", "queued", "waiting_retry", "blocked"])
     .lte("run_after", new Date().toISOString())
     .order("run_after", { ascending: true })
     .limit(BATCH_SIZE);
