@@ -84,9 +84,12 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
     }
     const next = [...messages, { role: "user" as const, content }];
     setMessages(next); setDraft(""); setError("");
-    const video = content.match(/^(?:create|make) video\s*[:\-]\s*(.+)$/i);
-    const reminder = content.match(/^remind me to (.+) at ((?:[01]?\d|2[0-3]):[0-5]\d)$/i);
-    const nav = content.match(/^(?:open|go to) (create|edit|tools|schedule|settings|home)$/i);
+    // A fresh user message cancels any older unconfirmed action.
+    setPending(null);
+    const video = content.match(/^(?:(?:create|make)\\s+(?:a\\s+)?video|video\\s+create|வீடியோ\\s+உருவாக்கு)\\s*[:\\-]\\s*(.+)$/i)
+      ?? content.match(/^(?:create|make)\\s+(?:a\\s+)?video\\s+(.+)$/i);
+    const reminder = content.match(/^(?:remind me to|remind me|nyabagam paduthu|நினைவூட்டு)\\s+(.+?)\\s+(?:at|க்கு)\\s*((?:[01]?\\d|2[0-3]):[0-5]\\d)$/i);
+    const nav = content.match(/^(?:open|go to)\\s+(create|edit|tools|schedule|settings|home)$/i);
     if (video) { setPending({ title: "Create video project", detail: video[1], run: () => onCreateVideoProject(video[1].trim()) }); setMessages(v => [...v, { role: "assistant", content: "இந்த video project-ஐ queue-ல் சேர்க்கலாமா? Confirm அழுத்தினால் மட்டும் சேர்க்கப்படும்." }]); return; }
     if (reminder) { setPending({ title: "Save reminder", detail: reminder[1] + " at " + reminder[2], run: () => onCreateReminder(reminder[1].trim(), reminder[2]) }); setMessages(v => [...v, { role: "assistant", content: "இந்த reminder-ஐ சேமிக்கலாமா? Confirm அழுத்தினால் மட்டும் சேமிக்கப்படும்." }]); return; }
     if (nav) { const tab = nav[1][0].toUpperCase() + nav[1].slice(1).toLowerCase(); setPending({ title: "Open " + tab, detail: "RJ " + tab + " screen", run: async () => onNavigate(tab) }); setMessages(v => [...v, { role: "assistant", content: tab + " screen-ஐ திறக்கலாமா?" }]); return; }
