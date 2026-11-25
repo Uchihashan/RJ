@@ -141,7 +141,7 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
           <View style={styles.heroCopy}>
             <Text style={styles.eyebrow}>RJ CENTRAL BRAIN</Text>
             <Text style={styles.heading}>Talk to RJ</Text>
-            <Text style={styles.sub}>Tamil • Tanglish • English · Gemini first, OpenRouter fallback</Text>
+            <Text style={styles.sub}>Tamil • Tanglish • English · OpenRouter Free, Groq Free fallback</Text>
           </View>
           <Pressable accessibilityRole="button" onPress={clearChat} disabled={busy || actionBusy} style={styles.clearButton}>
             <Text style={styles.clearText}>CLEAR CHAT</Text>
