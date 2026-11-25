@@ -88,7 +88,7 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
     const nav = content.match(/^(?:open|go to)\s+(create|edit|tools|schedule|settings|home)$/i);
     if (video) { setPending({ title: "Create video project", detail: video[1], run: () => onCreateVideoProject(video[1].trim()) }); setMessages(v => [...v, { role: "assistant", content: "இந்த video project-ஐ queue-ல் சேர்க்கலாமா? Confirm அழுத்தினால் மட்டும் சேர்க்கப்படும்." }]); return; }
     if (reminder) { setPending({ title: "Save reminder", detail: reminder[1] + " at " + reminder[2], run: () => onCreateReminder(reminder[1].trim(), reminder[2]) }); setMessages(v => [...v, { role: "assistant", content: "இந்த reminder-ஐ சேமிக்கலாமா? Confirm அழுத்தினால் மட்டும் சேமிக்கப்படும்." }]); return; }
-    if (nav) { const tab = nav[1][0].toUpperCase() + nav[1].slice(1).toLowerCase(); setPending({ title: "Open " + tab, detail: "RJ " + tab + " screen", run: () => onNavigate(tab) }); setMessages(v => [...v, { role: "assistant", content: tab + " screen-ஐ திறக்கலாமா?" }]); return; }
+    if (nav) { const aliases: Record<string, string> = { "உருவாக்கு": "Create", "திருத்து": "Edit", "கருவிகள்": "Tools", "அட்டவணை": "Schedule", "அமைப்புகள்": "Settings", "முகப்பு": "Home" }; const raw = nav[1].toLowerCase(); const tab = aliases[nav[1]] ?? raw[0].toUpperCase() + raw.slice(1); setPending({ title: "Open " + tab, detail: "RJ " + tab + " screen", run: () => onNavigate(tab) }); setMessages(v => [...v, { role: "assistant", content: tab + " screen-ஐ திறக்கலாமா?" }]); return; }
     if (!supabase) {
       setError("RJ cloud connection is not configured in this build.");
       return;
