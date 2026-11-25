@@ -149,7 +149,7 @@ async function cloudflareImageCoolingDown(db: SupabaseClient, userId: string): P
     .eq("user_id", userId)
     .eq("provider_key", "cloudflare_flux_schnell")
     .eq("error_code", "daily_free_quota_exhausted")
-    .gte("created_at", new Date(now - 24 * 60 * 60_000).toISOString())
+    .gte("created_at", new Date(Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate())).toISOString())
     .limit(1);
   if (dailyError) throw dailyError;
   if ((daily ?? []).length) return true;
