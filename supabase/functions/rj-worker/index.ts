@@ -400,7 +400,15 @@ async function processJob(message: QueueMessage) {
       updated_at: now,
     }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
     if (storyStageError) throw storyStageError;
-    await markPipelineBlocked(jobId, "scene_assets", "No connected image/video generation adapter is configured yet. The story is saved; this project is waiting for the next pipeline capability.");
+    const { error: sceneQueueError } = await admin.from("job_stages").update({
+      status: "pending",
+      locked_at: null,
+      error_code: null,
+      error_message: null,
+      run_after: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("job_id", jobId).eq("stage_key", "scene_assets");
+    if (sceneQueueError) throw sceneQueueError;
 
     const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
     if (archiveError) throw archiveError;
