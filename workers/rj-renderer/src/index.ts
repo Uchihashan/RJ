@@ -14,7 +14,7 @@ import {
 } from "./pipeline.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const SERVICE_KEY = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const BUCKET = process.env.RJ_RENDER_BUCKET ?? "rj-renders";
 const POLL_MS = Math.max(5_000, Number(process.env.RJ_RENDER_POLL_MS ?? 15_000));
 const BATCH_SIZE = Math.max(1, Math.min(5, Number(process.env.RJ_RENDER_BATCH_SIZE ?? 2)));
@@ -25,6 +25,7 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
+  global: { headers: SERVICE_KEY.startsWith("sb_secret_") ? { Authorization: "" } : {} },
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
