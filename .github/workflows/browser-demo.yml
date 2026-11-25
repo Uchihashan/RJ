@@ -36,6 +36,8 @@ jobs:
       - name: Test and build FFmpeg renderer worker
         working-directory: workers/rj-renderer
         run: npm install --no-audit --no-fund && npm test && npm run build
+      - name: Build FFmpeg renderer Docker image
+        run: docker build -t rj-renderer-ci ./workers/rj-renderer
       - name: Export browser demo
         run: npx expo export --platform web
       - name: Upload private workflow artifact
