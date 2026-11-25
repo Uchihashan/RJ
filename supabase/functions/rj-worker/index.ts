@@ -213,11 +213,11 @@ async function processJob(message: QueueMessage) {
     (credentialRows ?? []).map((row: { provider: string; api_key: string }) => [row.provider, row.api_key]),
   );
   const prompt = buildPrompt(String(job.input?.topic ?? ""), String(job.input?.language ?? "Tamil"));
-  const providers: { name: string; run: () => Promise<string> }[] = [];
+  const providers: { name: string; providerKey: string; run: () => Promise<string> }[] = [];
   const geminiKey = credentialMap.get("gemini");
   const openRouterKey = credentialMap.get("openrouter");
-  if (geminiKey) providers.push({ name: "gemini_free_tier", run: () => callGemini(geminiKey, prompt) });
-  if (openRouterKey) providers.push({ name: "openrouter_free_router", run: () => callOpenRouterFree(openRouterKey, prompt) });
+  if (geminiKey) providers.push({ name: "gemini_free_tier", providerKey: "gemini", run: () => callGemini(geminiKey, prompt) });
+  if (openRouterKey) providers.push({ name: "openrouter_free_router", providerKey: "openrouter", run: () => callOpenRouterFree(openRouterKey, prompt) });
 
   if (providers.length === 0) {
     const { error: pauseError } = await admin.from("jobs").update({
@@ -234,8 +234,40 @@ async function processJob(message: QueueMessage) {
     return { job_id: jobId, outcome: "paused_provider_not_configured" };
   }
 
+  const { data: healthRows, error: healthError } = await admin.from("provider_health")
+    .select("provider_key,state,cooldown_until")
+    .eq("user_id", userId)
+    .eq("capability", "text");
+  if (healthError) throw healthError;
+  const healthByProvider = new Map<string, { state: string; cooldown_until: string | null }>(
+    (healthRows ?? []).map((row: { provider_key: string; state: string; cooldown_until: string | null }) => [row.provider_key, row]),
+  );
+  const nowMs = Date.now();
+  const availableProviders = providers.filter((provider) => {
+    const health = healthByProvider.get(provider.providerKey);
+    return !health || health.state !== "cooldown" || !health.cooldown_until || new Date(health.cooldown_until).getTime() <= nowMs;
+  });
+  if (providers.length > 0 && availableProviders.length === 0) {
+    const retryAt = providers.map((provider) => healthByProvider.get(provider.providerKey)?.cooldown_until)
+      .filter((value): value is string => !!value)
+      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
+    const delaySeconds = retryAt ? Math.max(60, Math.ceil((new Date(retryAt).getTime() - Date.now()) / 1000)) : 300;
+    const { error: retryUpdateError } = await admin.from("jobs").update({
+      status: "waiting_retry", current_stage: "script_storyboard",
+      error_code: "text_providers_cooling_down",
+      error_message: "Connected text providers are cooling down after quota or transient errors. RJ will retry when available.",
+      run_after: new Date(Date.now() + delaySeconds * 1000).toISOString(), updated_at: new Date().toISOString(),
+    }).eq("id", jobId).eq("user_id", userId);
+    if (retryUpdateError) throw retryUpdateError;
+    const { error: enqueueError } = await admin.rpc("rj_retry_job", { p_message: payload, p_delay_seconds: delaySeconds });
+    if (enqueueError) throw enqueueError;
+    const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+    if (archiveError) throw archiveError;
+    return { job_id: jobId, outcome: "waiting_for_provider_cooldown", delay_seconds: delaySeconds };
+  }
+
   const failures: ProviderFailure[] = [];
-  for (const provider of providers) {
+  for (const provider of availableProviders) {
     const { data: attempt, error: attemptError } = await admin
       .from("job_attempts")
       .insert({ job_id: jobId, provider: provider.name, status: "started" })
@@ -249,6 +281,16 @@ async function processJob(message: QueueMessage) {
     } catch (error) {
       const failure = classifyFailure(provider.name, error);
       failures.push(failure);
+      const cooldownMinutes = failure.quota ? 30 : failure.retryable ? 5 : null;
+      const { error: healthUpdateError } = await admin.from("provider_health").upsert({
+        user_id: userId, provider_key: provider.providerKey, capability: "text",
+        state: cooldownMinutes ? "cooldown" : "needs_attention",
+        cooldown_until: cooldownMinutes ? new Date(Date.now() + cooldownMinutes * 60000).toISOString() : null,
+        last_http_status: failure.status,
+        last_error_code: failure.quota ? "quota_exhausted" : failure.status === null ? "network_error" : "http_" + failure.status,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,provider_key,capability" });
+      if (healthUpdateError) throw healthUpdateError;
       const { error: failureUpdateError } = await admin.from("job_attempts").update({
         status: failure.quota ? "quota_exhausted" : failure.status === 429 ? "rate_limited" : "failed",
         error_code: failure.status === null ? "network_error" : "http_" + failure.status,
@@ -258,6 +300,13 @@ async function processJob(message: QueueMessage) {
       if (failureUpdateError) throw failureUpdateError;
       continue;
     }
+
+    const { error: healthUpdateError } = await admin.from("provider_health").upsert({
+      user_id: userId, provider_key: provider.providerKey, capability: "text",
+      state: "available", cooldown_until: null, last_http_status: 200,
+      last_error_code: null, updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id,provider_key,capability" });
+    if (healthUpdateError) throw healthUpdateError;
 
     const { error: attemptUpdateError } = await admin.from("job_attempts").update({
       status: "succeeded",
