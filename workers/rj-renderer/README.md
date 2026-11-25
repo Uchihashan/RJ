@@ -41,3 +41,10 @@ The worker requires the branch-only Supabase migrations, including the durable s
 Create a Render Background Worker using this Dockerfile and the `workers/rj-renderer` directory as its Docker context. Choose a Singapore region when available for Sri Lanka latency. A continuously running Render worker requires a paid compute plan; do not approve or create the service until the user has reviewed its current price.
 
 The worker handles SIGTERM/SIGINT by stopping new polls and finishing the current render before exit. No Render service has been created or deployed by this code change.
+
+## Free Tamil narration and image generation
+
+- Tamil narration is generated locally inside the renderer with Piper ONNX; it does not call a paid speech API. The primary voice is tinisoft's Rasa Female (CC BY 4.0) and the fallback is Jeyaram-K's HemaLatha (Apache-2.0). Model attribution and licenses are preserved here.
+- The Cloudflare FLUX.1 schnell image adapter is optional and is only for accounts on the **Workers Free** plan. The 10,000 Neurons/day allowance hard-stops at quota on that plan. Do not configure a Workers Paid account: usage above the allowance can be billed.
+- If the Cloudflare image quota is exhausted, the renderer stops calling Cloudflare for that job and uses locally generated vector scene cards. No paid image fallback is ever used.
+- The renderer includes the model weights in its Docker image; downloading/building this image is free of model licensing fees but the machine hosting the renderer may still have infrastructure charges. Do not deploy it to a paid host without explicit approval.
