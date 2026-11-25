@@ -69,6 +69,8 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
   const clearChat = async () => {
     if (busy) return;
     setMessages([WELCOME]);
+    setPending(null);
+    setActionBusy(false);
     setError("");
     await AsyncStorage.removeItem(storageKey).catch(() => undefined);
   };
