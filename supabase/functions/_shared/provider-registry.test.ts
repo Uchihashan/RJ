@@ -15,6 +15,34 @@ Deno.test("free-only routing excludes account-dependent Gemini", () => {
   }
 });
 
+Deno.test("free text providers are ordered for automatic fallback", () => {
+  const keys = new Map([["openrouter", "secret"], ["groq", "secret"]]);
+  const selected = selectEligibleProviders("text", keys, [], {
+    allowPaidProviders: false,
+    monthlyBudgetUsd: 0,
+  });
+  const names = selected.map((provider) => provider.key).join(",");
+  if (names !== "openrouter,groq_free") {
+    throw new Error("Expected OpenRouter first and Groq Free as the next free fallback; got " + names);
+  }
+});
+
+Deno.test("quota cooldown on first free provider falls through to the next free provider", () => {
+  const keys = new Map([["openrouter", "secret"], ["groq", "secret"]]);
+  const health: ProviderHealth[] = [{
+    provider_key: "openrouter",
+    state: "cooldown",
+    cooldown_until: new Date(2_000).toISOString(),
+  }];
+  const selected = selectEligibleProviders("text", keys, health, {
+    allowPaidProviders: false,
+    monthlyBudgetUsd: 0,
+  }, 1_000);
+  if (selected.length !== 1 || selected[0].key !== "groq_free") {
+    throw new Error("RJ must skip a cooling-down provider and select the next compatible free provider");
+  }
+});
+
 Deno.test("paid routing still prefers compatible free providers", () => {
   const keys = new Map([["gemini", "secret"], ["openrouter", "secret"]]);
   const selected = selectEligibleProviders("text", keys, [], {
