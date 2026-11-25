@@ -259,6 +259,11 @@ async function processJob(message: QueueMessage) {
       run_after: new Date(Date.now() + delaySeconds * 1000).toISOString(), updated_at: new Date().toISOString(),
     }).eq("id", jobId).eq("user_id", userId);
     if (retryUpdateError) throw retryUpdateError;
+    const { error: stageRetryError } = await admin.from("job_stages").update({
+      status: "waiting_retry", error_code: "provider_cooldown",
+      error_message: "All connected text providers are cooling down.", updated_at: new Date().toISOString(),
+    }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
+    if (stageRetryError) throw stageRetryError;
     const { error: enqueueError } = await admin.rpc("rj_retry_job", { p_message: payload, p_delay_seconds: delaySeconds });
     if (enqueueError) throw enqueueError;
     const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
@@ -268,6 +273,12 @@ async function processJob(message: QueueMessage) {
 
   const failures: ProviderFailure[] = [];
   for (const provider of availableProviders) {
+    const stageStartedAt = new Date().toISOString();
+    const { error: stageStartError } = await admin.from("job_stages").update({
+      status: "running", selected_provider: provider.name, started_at: stageStartedAt,
+      error_code: null, error_message: null, updated_at: stageStartedAt,
+    }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
+    if (stageStartError) throw stageStartError;
     const { data: attempt, error: attemptError } = await admin
       .from("job_attempts")
       .insert({ job_id: jobId, provider: provider.name, status: "started" })
@@ -361,6 +372,11 @@ async function processJob(message: QueueMessage) {
       updated_at: new Date().toISOString(),
     }).eq("id", jobId).eq("user_id", userId);
     if (retryUpdateError) throw retryUpdateError;
+    const { error: stageRetryError } = await admin.from("job_stages").update({
+      status: "waiting_retry", error_code: "provider_temporarily_unavailable",
+      error_message: "All attempted text providers are temporarily unavailable.", updated_at: new Date().toISOString(),
+    }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
+    if (stageRetryError) throw stageRetryError;
     const { error: enqueueError } = await admin.rpc("rj_retry_job", {
       p_message: payload,
       p_delay_seconds: delaySeconds,
@@ -379,6 +395,12 @@ async function processJob(message: QueueMessage) {
     updated_at: new Date().toISOString(),
   }).eq("id", jobId).eq("user_id", userId);
   if (failedUpdateError) throw failedUpdateError;
+  const { error: stageFailedError } = await admin.from("job_stages").update({
+    status: "failed", error_code: "all_providers_failed",
+    error_message: failures.map((failure) => failure.message).join(" | ").slice(0, 500),
+    finished_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
+  if (stageFailedError) throw stageFailedError;
   const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
   if (archiveError) throw archiveError;
   return { job_id: jobId, outcome: "failed", providers_tried: failures.map((failure) => failure.provider) };
