@@ -82,18 +82,25 @@ Deno.serve(async (req: Request) => {
     if (!approval) return json({ error: "Approve this exact video in RJ before uploading." }, 403);
     auditId = approval.id;
 
+    const { data: channel, error: channelError } = await admin.from("youtube_channels")
+      .select("id").eq("user_id", auth.user.id).eq("is_active", true)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (channelError) throw channelError;
+    if (!channel) {
+      await admin.from("job_stages").update({
+        status: "blocked", error_code: "youtube_not_connected",
+        error_message: "Connect a YouTube channel before uploading.",
+        updated_at: new Date().toISOString(),
+      }).eq("job_id", jobId).eq("user_id", auth.user.id).eq("stage_key", "youtube_upload");
+      return json({ error: "Connect a YouTube channel in RJ Settings first." }, 409);
+    }
+    channelRef = channel.id;
+
     const { data: claimed, error: claimError } = await admin.rpc("rj_claim_job_stage", {
       p_job_id: jobId, p_user_id: auth.user.id, p_stage_key: "youtube_upload", p_lease_seconds: 1800,
     });
     if (claimError) throw claimError;
     if (claimed !== true) return json({ error: "This video is already being uploaded or the upload stage is not ready." }, 409);
-
-    const { data: channel, error: channelError } = await admin.from("youtube_channels")
-      .select("id").eq("user_id", auth.user.id).eq("is_active", true)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (channelError) throw channelError;
-    if (!channel) return json({ error: "Connect a YouTube channel in RJ Settings first." }, 409);
-    channelRef = channel.id;
 
     const { data: reservation, error: reserveError } = await admin.rpc("rj_reserve_youtube_upload", {
       p_user_id: auth.user.id, p_channel_ref: channelRef, p_job_id: jobId,
