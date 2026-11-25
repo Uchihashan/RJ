@@ -159,11 +159,23 @@ async function initializePipelineStages(jobId: string, userId: string) {
 async function markPipelineBlocked(jobId: string, stageKey: string, reason: string) {
   const { error } = await admin.from("job_stages").update({
     status: "blocked",
+    locked_at: null,
     error_code: "capability_provider_missing",
     error_message: reason.slice(0, 500),
     updated_at: new Date().toISOString(),
   }).eq("job_id", jobId).eq("stage_key", stageKey);
   if (error) throw error;
+}
+
+async function claimPipelineStage(jobId: string, userId: string, stageKey: string) {
+  const { data, error } = await admin.rpc("rj_claim_job_stage", {
+    p_job_id: jobId,
+    p_user_id: userId,
+    p_stage_key: stageKey,
+    p_lease_seconds: 600,
+  });
+  if (error) throw error;
+  return data === true;
 }
 
 async function processJob(message: QueueMessage) {
@@ -190,6 +202,14 @@ async function processJob(message: QueueMessage) {
   }
 
   await initializePipelineStages(jobId, userId);
+
+  // The pgmq visibility window and cron overlap can expose the same job to
+  // concurrent workers. Claim the stage atomically before any provider call.
+  const stageClaimed = await claimPipelineStage(jobId, userId, "script_storyboard");
+  if (!stageClaimed) {
+    await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+    return { job_id: jobId, outcome: "stage_already_claimed_or_finished" };
+  }
 
   const { data: credentialRows, error: credentialError } = await admin.rpc("rj_get_provider_keys", { p_user_id: userId });
   if (credentialError) throw credentialError;
@@ -238,7 +258,7 @@ async function processJob(message: QueueMessage) {
       }).eq("id", jobId).eq("user_id", userId);
       if (retryUpdateError) throw retryUpdateError;
       const { error: stageRetryError } = await admin.from("job_stages").update({
-        status: "waiting_retry", error_code: "provider_cooldown",
+        status: "waiting_retry", locked_at: null, error_code: "provider_cooldown",
         error_message: "All compatible text providers are cooling down.", updated_at: new Date().toISOString(),
       }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
       if (stageRetryError) throw stageRetryError;
@@ -373,6 +393,7 @@ async function processJob(message: QueueMessage) {
     const now = new Date().toISOString();
     const { error: storyStageError } = await admin.from("job_stages").update({
       status: "succeeded",
+      locked_at: null,
       selected_provider: provider.label,
       output: { story_ready: true },
       finished_at: now,
@@ -401,7 +422,7 @@ async function processJob(message: QueueMessage) {
     }).eq("id", jobId).eq("user_id", userId);
     if (retryUpdateError) throw retryUpdateError;
     const { error: stageRetryError } = await admin.from("job_stages").update({
-      status: "waiting_retry", error_code: "provider_temporarily_unavailable",
+      status: "waiting_retry", locked_at: null, error_code: "provider_temporarily_unavailable",
       error_message: "All attempted text providers are temporarily unavailable.", updated_at: new Date().toISOString(),
     }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
     if (stageRetryError) throw stageRetryError;
@@ -424,7 +445,7 @@ async function processJob(message: QueueMessage) {
   }).eq("id", jobId).eq("user_id", userId);
   if (failedUpdateError) throw failedUpdateError;
   const { error: stageFailedError } = await admin.from("job_stages").update({
-    status: "failed", error_code: "all_providers_failed",
+    status: "failed", locked_at: null, error_code: "all_providers_failed",
     error_message: failures.map((failure) => failure.message).join(" | ").slice(0, 500),
     finished_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
