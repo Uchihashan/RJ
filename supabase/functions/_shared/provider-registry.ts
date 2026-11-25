@@ -87,6 +87,17 @@ export const PROVIDER_CATALOG: readonly ProviderSpec[] = [
     enabled: false,
   },
   {
+    key: "cloudflare_flux_schnell",
+    label: "Cloudflare Workers AI Free",
+    capability: "image",
+    model: "@cf/black-forest-labs/flux-1-schnell",
+    pricingMode: "free_tier",
+    outputFormats: ["image/jpeg"],
+    credentialKey: "cloudflare",
+    // Use only a Cloudflare Workers Free account. Its daily free allocation hard-stops at quota.
+    enabled: true,
+  },
+  {
     key: "gemini_image",
     label: "Google Gemini Flash Lite Image",
     capability: "image",
