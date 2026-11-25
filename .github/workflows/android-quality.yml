@@ -42,6 +42,18 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Install renderer dependencies
+        working-directory: workers/rj-renderer
+        run: npm install --no-audit --no-fund
+
+      - name: Test renderer pipeline
+        working-directory: workers/rj-renderer
+        run: npm test
+
+      - name: Build renderer worker
+        working-directory: workers/rj-renderer
+        run: npm run build
+
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
