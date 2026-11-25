@@ -26,6 +26,7 @@ function fromBase64(value: string) {
   const raw = atob(value.replace(/-/g,"+").replace(/_/g,"/"));
   return Uint8Array.from(raw, c => c.charCodeAt(0));
 }
+function randomToken(bytes = 32) { return base64(crypto.getRandomValues(new Uint8Array(bytes))); }
 async function sha256(value: string) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
 }
