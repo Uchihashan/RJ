@@ -40,4 +40,3 @@ on conflict (provider_key, capability, model_key) do update set
   notes = excluded.notes,
   updated_at = now();
 
-comment on bucket storage.buckets is 'RJ render outputs are private and stored under {user_id}/{job_id}/ paths.';
