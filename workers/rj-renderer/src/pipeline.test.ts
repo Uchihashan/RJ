@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildSceneSvg,
+  buildSceneOverlaySvg,
   buildSrt,
   escapeXml,
   formatSrtTime,
@@ -45,4 +46,14 @@ test("subtitle times are valid SRT timestamps", () => {
 test("scene duration is bounded for long narration", () => {
   assert.equal(sceneDurationSeconds({ title: "Short", text: "hello" }), 6);
   assert.equal(sceneDurationSeconds({ title: "Long", text: "word ".repeat(100) }), 14);
+});
+test("builds transparent text overlay for generated scene images", () => {
+  const svg = buildSceneOverlaySvg({ title: "கதை", topic: "காடு", body: "ஒரு சிறிய பறவை", index: 0, total: 2 });
+  assert.match(svg, /fill="url\(#shade\)"/);
+  assert.match(svg, /ஒரு சிறிய பறவை/);
+});
+test("speech-aligned captions use supplied scene durations", () => {
+  const srt = buildSrt([{ title: "one", text: "first" }, { title: "two", text: "second" }], [8.5, 11]);
+  assert.match(srt, /00:00:00,000 --> 00:00:08,500/);
+  assert.match(srt, /00:00:08,500 --> 00:00:19,500/);
 });
