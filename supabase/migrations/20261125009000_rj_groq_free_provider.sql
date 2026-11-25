@@ -88,7 +88,7 @@ begin
       and j.error_code in ('provider_not_configured', 'paid_provider_consent_required')
       and exists (
         select 1 from private.rj_provider_credentials c
-        where c.user_id = j.user_id and c.provider in ('openrouter', 'groq')
+        where c.user_id = j.user_id and c.provider in ('openrouter', 'groq', 'cloudflare')
       )
     order by j.created_at
     limit least(greatest(coalesce(p_limit, 5), 1), 10)
@@ -118,6 +118,18 @@ set availability = 'available',
     notes = 'Use only with a Groq Free-tier organization and never upgrade to Developer/PayGo. RJ falls back on free-tier quota responses.'
 where provider_key = 'groq_free' and capability = 'text' and model_key = 'openai/gpt-oss-20b';
 
+
+insert into public.provider_capability_catalog
+  (provider_key, capability, model_key, output_formats, pricing_mode, availability, notes)
+values
+  ('cloudflare_flux_schnell','image','@cf/black-forest-labs/flux-1-schnell',array['image/jpeg'],'free_tier','available',
+   'Only for Cloudflare Workers Free plan. 10,000 Neurons/day hard-stops at quota; never use Workers Paid or any account that can bill above the free allocation.')
+on conflict (provider_key, capability, model_key) do update set
+  output_formats = excluded.output_formats,
+  pricing_mode = excluded.pricing_mode,
+  availability = excluded.availability,
+  notes = excluded.notes,
+  updated_at = now();
 
 update public.provider_capability_catalog
 set availability = 'available',
