@@ -29,6 +29,7 @@
     },
     "web": {
       "bundler": "metro"
-    }
+    },
+    "scheme": "rj"
   }
-}
+}\n
