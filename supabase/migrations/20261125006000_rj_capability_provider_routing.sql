@@ -58,7 +58,9 @@ values
   ('openrouter','text','openrouter/free',array['text'],'free_route','available',
    'Uses only OpenRouter free-model routing; model availability and free quotas can change.'),
   ('gemini','text','gemini-3.5-flash-lite',array['text'],'account_dependent','disabled_by_policy',
-   'Adapter intentionally disabled until RJ implements reliable per-request cost measurement and hard spend enforcement.')
+   'Adapter intentionally disabled until RJ implements reliable per-request cost measurement and hard spend enforcement.'),
+  ('gemini_tts','speech','gemini-3.8-flash-tts',array['audio/wav'],'account_dependent','disabled_by_policy',
+   'Tamil is supported by the official TTS model. A free tier is listed, but API projects can be billable; keep disabled until account-tier verification and hard spend enforcement exist.')
 on conflict (provider_key, capability, model_key) do update set
   output_formats = excluded.output_formats,
   pricing_mode = excluded.pricing_mode,
