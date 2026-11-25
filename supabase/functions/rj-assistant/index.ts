@@ -120,7 +120,6 @@ Deno.serve(async (req: Request) => {
     console.error("RJ provider lookup failed", keyError.message);
     return json({ error: "RJ could not load your connected AI provider. Check Settings." }, 503);
   }
-  const keys = new Map<string, string>((rows ?? []).map((r: { provider: string; api_key: string }) => [r.provider, r.api_key]));
   const { data: policyRow, error: policyError } = await admin.from("provider_user_policies")
     .select("allow_paid_providers,monthly_budget_usd")
     .eq("user_id", authData.user.id)
@@ -144,7 +143,7 @@ Deno.serve(async (req: Request) => {
     const paidConsentNeeded = keys.has("gemini") && !policy.allowPaidProviders && !keys.has("openrouter");
     return json({
       error: paidConsentNeeded
-        ? "Gemini may be billable on your account. Enable paid providers and set a monthly budget in RJ Settings, or connect OpenRouter's free router."
+        ? "Gemini may be billable on your account. RJ will not use it until paid-provider cost metering and explicit spending controls are ready. Connect OpenRouter's free router for now."
         : "AI provider not connected or currently cooling down. Connect a free text provider in RJ Settings.",
       code: paidConsentNeeded ? "paid_provider_consent_required" : "provider_unavailable",
     }, paidConsentNeeded ? 402 : 424);
