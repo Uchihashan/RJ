@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import {
+  buildKenBurnsFilter,
   buildSceneOverlaySvg,
   buildSceneSvg,
   buildSrt,
@@ -265,6 +266,7 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
   durationSeconds: number;
   visualMode: string;
   imageCount: number;
+  sceneAssets: Array<{ sceneNumber: number; title: string; narrationText: string; image: Buffer; durationSeconds: number; source: string }>;
 }> {
   const story = typeof job.output?.story === "string" ? job.output.story : "";
   if (!story) throw new Error("The story stage has no saved story text");
@@ -291,6 +293,7 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
     }
     let imageCount = 0;
     const pngPaths: string[] = [];
+    const sceneAssets: Array<{ sceneNumber: number; title: string; narrationText: string; image: Buffer; source: string }> = [];
     for (let index = 0; index < scenes.length; index += 1) {
       const scene = scenes[index]!;
       const pngPath = join(workDir, `scene-${String(index + 1).padStart(2, "0")}.png`);
@@ -314,7 +317,12 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
           });
         }
       }
+      const sceneImagePath = join(workDir, `scene-${String(index + 1).padStart(2, "0")}-source.jpg`);
       if (generatedImage) {
+        await sharp(generatedImage)
+          .resize(1280, 720, { fit: "cover", position: "attention" })
+          .jpeg({ quality: 90 })
+          .toFile(sceneImagePath);
         const overlay = Buffer.from(buildSceneOverlaySvg({
           title: scene.title, topic, body: scene.text, index, total: scenes.length,
         }));
@@ -327,8 +335,16 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
         const svg = buildSceneSvg({
           title: scene.title, topic, body: scene.text, index, total: scenes.length,
         });
+        await sharp(Buffer.from(svg)).jpeg({ quality: 90 }).toFile(sceneImagePath);
         await sharp(Buffer.from(svg)).png().toFile(pngPath);
       }
+      sceneAssets.push({
+        sceneNumber: index + 1,
+        title: scene.title,
+        narrationText: scene.text,
+        image: await readFile(sceneImagePath),
+        source: generatedImage ? "cloudflare_flux_schnell" : "local_vector_fallback",
+      });
       pngPaths.push(pngPath);
     }
 
@@ -385,7 +401,7 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
     if (narration) ffmpegArgs.push("-i", join(workDir, "narration.wav"));
     ffmpegArgs.push(
       "-r", "30",
-      "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+      "-vf", buildKenBurnsFilter(1280, 720),
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
       "-movflags", "+faststart",
     );
@@ -414,8 +430,9 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
       voiceModel,
       sceneCount: scenes.length,
       durationSeconds,
-      visualMode: imageCount ? "cloudflare_flux_schnell_with_vector_fallback" : "vector_story_cards",
+      visualMode: imageCount ? "cloudflare_flux_schnell_with_ken_burns_motion" : "vector_story_cards_with_ken_burns_motion",
       imageCount,
+      sceneAssets: sceneAssets.map((asset, index) => ({ ...asset, durationSeconds: sceneDurations[index] ?? sceneDurationSeconds(scenes[index]!) })),
     };
   } finally {
     await rm(workDir, { recursive: true, force: true });
@@ -465,6 +482,20 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
     await uploadAsset(db, thumbnailPath, result.thumbnail, "image/jpeg");
     await uploadAsset(db, captionsPath, result.captions, "application/x-subrip");
     if (result.narration && narrationPath) await uploadAsset(db, narrationPath, result.narration, "audio/wav");
+    const sceneTimeline = [];
+    for (const scene of result.sceneAssets) {
+      const scenePath = `${basePath}/scenes/scene-${String(scene.sceneNumber).padStart(2, "0")}.jpg`;
+      await uploadAsset(db, scenePath, scene.image, "image/jpeg");
+      sceneTimeline.push({
+        scene_number: scene.sceneNumber,
+        title: scene.title,
+        narration_text: scene.narrationText,
+        image_path: scenePath,
+        duration_seconds: scene.durationSeconds,
+        image_source: scene.source,
+        motion: "ken_burns_slow_zoom",
+      });
+    }
 
     const now = new Date().toISOString();
     await updateStage(db, job.id, "scene_assets", {
@@ -498,7 +529,7 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
     await updateStage(db, job.id, "timeline_edit", {
       status: "succeeded",
       selected_provider: "ffmpeg",
-      output: { codec: "h264", width: 1280, height: 720, fps: 30, audio: Boolean(result.narration), audio_codec: result.narration ? "aac" : null },
+      output: { codec: "h264", width: 1280, height: 720, fps: 30, audio: Boolean(result.narration), audio_codec: result.narration ? "aac" : null, motion_engine: "ffmpeg_ken_burns" },
       finished_at: now,
       error_code: null,
       error_message: null,
@@ -563,6 +594,8 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
           scene_count: result.sceneCount,
           visual_mode: result.visualMode,
           generated_image_count: result.imageCount,
+          scene_asset_count: sceneTimeline.length,
+          timeline: { version: 1, motion_engine: "ffmpeg_ken_burns", scenes: sceneTimeline },
           narration: result.narration ? "generated_locally" : "not_generated",
           voice_model: result.voiceModel,
           narration_path: narrationPath,
@@ -585,6 +618,8 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
       narration: Boolean(result.narration),
       voice_model: result.voiceModel,
       generated_image_count: result.imageCount,
+      scene_asset_count: sceneTimeline.length,
+      motion_engine: "ffmpeg_ken_burns",
     });
     return "rendered";
   } catch (error) {

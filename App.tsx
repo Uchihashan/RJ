@@ -22,7 +22,7 @@ import AssistantScreen from "./src/components/AssistantScreen";
 import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
 type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
-type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; hasNarration?: boolean };
+type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; sceneAssetCount?: number; hasNarration?: boolean };
 type PipelineStage = { job_id: string; stage_key: string; stage_order: number; status: string; selected_provider?: string | null; error_message?: string | null };
 const PIPELINE_STAGE_LABELS: Record<string, string> = { brief: "Brief", script_storyboard: "Story & script", scene_assets: "Visual scenes", voice_audio: "Voice-over", captions: "Captions", timeline_edit: "Timeline edit", render_export: "Render video", quality_check: "Quality check", metadata_thumbnail: "Title & thumbnail", youtube_upload: "YouTube upload", youtube_schedule_verify: "Schedule verification" };
 
@@ -222,6 +222,7 @@ export default function App() {
         renderDuration: typeof row.output?.render?.duration_seconds === "number" ? row.output.render.duration_seconds : undefined,
         renderMode: typeof row.output?.render?.visual_mode === "string" ? row.output.render.visual_mode : undefined,
         generatedImageCount: typeof row.output?.render?.generated_image_count === "number" ? row.output.render.generated_image_count : undefined,
+        sceneAssetCount: typeof row.output?.render?.scene_asset_count === "number" ? row.output.render.scene_asset_count : undefined,
         hasNarration: row.output?.render?.audio === true
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
@@ -731,7 +732,7 @@ export default function App() {
           {job.renderPath ? (
             <View style={{ marginTop: 10 }}>
               <Text style={styles.muted}>
-                {job.renderDuration ? Math.round(job.renderDuration) + " sec" : "Rendered"} • {job.generatedImageCount ? job.generatedImageCount + " AI images" : "Local scene artwork"} • {job.hasNarration ? "Tamil narration" : "No narration"}
+                {job.renderDuration ? Math.round(job.renderDuration) + " sec" : "Rendered"} • {job.generatedImageCount ? job.generatedImageCount + " AI images" : "Local scene artwork"} • {job.sceneAssetCount ? job.sceneAssetCount + " saved scene images" : "No saved scene assets"} • Ken Burns motion • {job.hasNarration ? "Tamil narration" : "No narration"}
               </Text>
               <Pressable onPress={async () => {
                 if (!supabase) return;

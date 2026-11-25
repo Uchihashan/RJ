@@ -113,6 +113,13 @@ export function wrapText(value: string, maxChars: number, maxLines: number): str
   return lines;
 }
 
+export function buildKenBurnsFilter(width = 1280, height = 720): string {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 320 || height < 320 || width > 1920 || height > 1920) {
+    throw new Error("Unsupported video dimensions");
+  }
+  return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='min(zoom+0.00045,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${width}x${height}:fps=30,format=yuv420p`;
+}
+
 export function sceneDurationSeconds(scene: StoryScene): number {
   const words = scene.text.split(/\s+/).filter(Boolean).length;
   return Math.max(6, Math.min(14, Math.ceil(words / 2.5)));
