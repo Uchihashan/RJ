@@ -41,14 +41,23 @@ async function encryptRefreshToken(token: string) {
 function randomToken(bytes = 32) { return base64(crypto.getRandomValues(new Uint8Array(bytes))); }
 
 async function startOAuth(req: Request) {
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !TOKEN_ENCRYPTION_KEY) {
-    return json({ error:"YouTube OAuth is not configured on the server yet." }, 503);
-  }
   const auth = req.headers.get("Authorization") ?? "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!bearer) return json({ error:"Sign in to connect YouTube." }, 401);
   const { data, error } = await admin.auth.getUser(bearer);
   if (error || !data.user) return json({ error:"Your RJ session is invalid. Sign in again." }, 401);
+  const input = await req.json().catch(() => ({}));
+  if (input?.action === "status") {
+    const { data: channel, error: channelError } = await admin.from("youtube_channels")
+      .select("channel_title,channel_handle").eq("user_id", data.user.id).eq("is_active", true)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (channelError) return json({ error:"Could not read YouTube connection status." }, 500);
+    return json({ connected:Boolean(channel), channel_title:channel?.channel_title ?? null, channel_handle:channel?.channel_handle ?? null });
+  }
+  if (input?.action !== "start") return json({ error:"Unsupported YouTube OAuth action." }, 400);
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !TOKEN_ENCRYPTION_KEY) {
+    return json({ error:"YouTube OAuth is not configured on the server yet." }, 503);
+  }
 
   const state = randomToken(32);
   const verifier = randomToken(48);
