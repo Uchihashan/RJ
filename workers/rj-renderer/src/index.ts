@@ -552,7 +552,7 @@ async function processYoutubeUpload(db: SupabaseClient, stage: StageRow): Promis
     }
 
     const { data: channel, error: channelError } = await db.from("youtube_channels")
-      .select("id,encrypted_refresh_token")
+      .select("id")
       .eq("user_id", job.user_id).eq("is_active", true)
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (channelError) throw channelError;
