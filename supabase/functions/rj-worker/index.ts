@@ -220,11 +220,40 @@ async function processJob(message: QueueMessage) {
   }));
 
   if (providers.length === 0) {
+    const compatibleProviders = selectEligibleProviders("text", credentialMap, [], policy);
+    const cooling = (healthRows ?? []).filter((row: ProviderHealth) =>
+      compatibleProviders.some((provider) => provider.key === row.provider_key)
+      && row.state === "cooldown" && row.cooldown_until
+      && new Date(row.cooldown_until).getTime() > Date.now()
+    );
+    if (cooling.length) {
+      const retryAt = cooling.map((row: ProviderHealth) => row.cooldown_until as string)
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
+      const delaySeconds = Math.max(60, Math.ceil((new Date(retryAt).getTime() - Date.now()) / 1000));
+      const { error: retryUpdateError } = await admin.from("jobs").update({
+        status: "waiting_retry", current_stage: "script_storyboard",
+        error_code: "text_providers_cooling_down",
+        error_message: "Compatible text providers are cooling down. RJ will retry automatically.",
+        run_after: retryAt, updated_at: new Date().toISOString(),
+      }).eq("id", jobId).eq("user_id", userId);
+      if (retryUpdateError) throw retryUpdateError;
+      const { error: stageRetryError } = await admin.from("job_stages").update({
+        status: "waiting_retry", error_code: "provider_cooldown",
+        error_message: "All compatible text providers are cooling down.", updated_at: new Date().toISOString(),
+      }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
+      if (stageRetryError) throw stageRetryError;
+      const { error: enqueueError } = await admin.rpc("rj_retry_job", { p_message: payload, p_delay_seconds: delaySeconds });
+      if (enqueueError) throw enqueueError;
+      const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+      if (archiveError) throw archiveError;
+      return { job_id: jobId, outcome: "waiting_for_provider_cooldown", delay_seconds: delaySeconds };
+    }
+
     const hasKeys = credentialMap.size > 0;
     const paidConsentNeeded = hasKeys && !policy.allowPaidProviders && !credentialMap.has("openrouter");
     const pauseCode = paidConsentNeeded ? "paid_provider_consent_required" : "provider_not_configured";
     const pauseMessage = paidConsentNeeded
-      ? "Only account-billed providers are connected. RJ will not use them until you explicitly enable paid providers and set a monthly budget in Settings."
+      ? "Only account-billed providers are connected. RJ will not use them until paid-provider metering and explicit spending controls are enabled."
       : "Connect a compatible free text provider in RJ Settings. Paid providers remain disabled by default.";
     const { error: pauseError } = await admin.from("jobs").update({
       status: "paused",
@@ -240,33 +269,9 @@ async function processJob(message: QueueMessage) {
     return { job_id: jobId, outcome: paidConsentNeeded ? "paused_paid_consent_required" : "paused_provider_not_configured" };
   }
 
-  const availableProviders = providers;
-  if (providers.length > 0 && availableProviders.length === 0) {
-    const retryAt = providers.map((provider) => healthByProvider.get(provider.key)?.cooldown_until)
-      .filter((value): value is string => !!value)
-      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
-    const delaySeconds = retryAt ? Math.max(60, Math.ceil((new Date(retryAt).getTime() - Date.now()) / 1000)) : 300;
-    const { error: retryUpdateError } = await admin.from("jobs").update({
-      status: "waiting_retry", current_stage: "script_storyboard",
-      error_code: "text_providers_cooling_down",
-      error_message: "Connected text providers are cooling down after quota or transient errors. RJ will retry when available.",
-      run_after: new Date(Date.now() + delaySeconds * 1000).toISOString(), updated_at: new Date().toISOString(),
-    }).eq("id", jobId).eq("user_id", userId);
-    if (retryUpdateError) throw retryUpdateError;
-    const { error: stageRetryError } = await admin.from("job_stages").update({
-      status: "waiting_retry", error_code: "provider_cooldown",
-      error_message: "All connected text providers are cooling down.", updated_at: new Date().toISOString(),
-    }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
-    if (stageRetryError) throw stageRetryError;
-    const { error: enqueueError } = await admin.rpc("rj_retry_job", { p_message: payload, p_delay_seconds: delaySeconds });
-    if (enqueueError) throw enqueueError;
-    const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
-    if (archiveError) throw archiveError;
-    return { job_id: jobId, outcome: "waiting_for_provider_cooldown", delay_seconds: delaySeconds };
-  }
 
   const failures: ReturnType<typeof classifyProviderFailure>[] = [];
-  for (const provider of availableProviders) {
+  for (const provider of providers) {
     const stageStartedAt = new Date().toISOString();
     const { error: stageStartError } = await admin.from("job_stages").update({
       status: "running", selected_provider: provider.label, started_at: stageStartedAt,
