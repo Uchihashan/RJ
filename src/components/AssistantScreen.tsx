@@ -115,15 +115,21 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
     let requestId = "";
     try {
       requestId = await onBeginAgentAction(pending.tool, pending.arguments);
-      const result = await pending.run();
-      await onFinishAgentAction(requestId, "succeeded", result);
+      let result = "";
+      try {
+        result = await pending.run();
+      } catch (e: any) {
+        await onFinishAgentAction(requestId, "failed", e?.message ?? "Action failed");
+        throw e;
+      }
       setMessages(v => [...v, { role: "assistant", content: result }]);
       setPending(null);
-    } catch (e: any) {
-      if (requestId) {
-        try { await onFinishAgentAction(requestId, "failed", e?.message ?? "Action failed"); }
-        catch { setError("RJ action failed and its audit record could not be updated. " + (e?.message ?? "")); }
+      try {
+        await onFinishAgentAction(requestId, "succeeded", result);
+      } catch {
+        setError("Action completed, but RJ could not update its audit status. Please check your connection before retrying.");
       }
+    } catch (e: any) {
       setError(e?.message ?? "RJ action failed.");
     } finally { setActionBusy(false); }
   };
