@@ -861,13 +861,13 @@ export default function App() {
         </Pressable>
         <ActionButton title={providerBusy === "cloudflare" ? "Saving…" : "Save Cloudflare Free credentials"} onPress={() => saveProviderKey("cloudflare", cloudflareAccountInput.trim() + ":" + cloudflareTokenInput.trim())} disabled={providerBusy !== null || !cloudflareFreePlanConfirmed || cloudflareAccountInput.trim().length < 20 || cloudflareTokenInput.trim().length < 20} />
         <Text style={styles.note}>IMPORTANT: Only connect this on Cloudflare Workers Free plan. Workers AI has 10,000 free Neurons/day there and hard-stops after the limit. Workers Paid accounts can be charged above the free quota; RJ will not use them. Keys are encrypted in Supabase Vault. If image quota is exhausted, RJ uses free local vector artwork.</Text>
-                <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses OpenRouter Free first, then Groq Free if the first provider is unavailable or quota-limited. Use a Groq Free-tier organization only; never upgrade it to Developer/PayGo. Gemini stays disabled. RJ never switches to paid providers.</Text>
+                <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses OpenRouter Free, then Groq Free for text; optional Cloudflare Workers AI is only for a confirmed Workers Free account. Tamil narration runs locally with Piper. Paid providers remain disabled.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Other connections</Text>
         <Text style={styles.listLine}>YouTube account: <Text style={styles.pending}>Not connected</Text></Text>
         <Text style={styles.listLine}>Cloud sync: <Text style={{ color: "#53C98B", fontWeight: "700" }}>Connected</Text></Text>
-        <Text style={styles.note}>YouTube OAuth, voice-over, visuals, subtitles and rendering are the next pipeline stages.</Text>
+        <Text style={styles.note}>YouTube OAuth, multi-channel publishing and scheduling are the remaining major pipeline stages.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>About RJ</Text>
