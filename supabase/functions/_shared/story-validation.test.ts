@@ -32,7 +32,7 @@ Deno.test("topic validator accepts a story containing both requested protagonist
 Deno.test("explicit character names must be retained", () => {
   const topic = "**மொப்பு** - வெண்மையான முயல். **குகன்** - சிங்கக் குட்டி.";
   const result = validateStoryAgainstTopic(topic, "மொப்பு என்ற முயலும் குகன் என்ற சிங்கமும் நண்பர்கள்.");
-  if (!result.ok) throw new Error("Correct named characters were rejected");
+  if (!result.ok) throw new Error("Correct named characters were rejected: " + JSON.stringify(result));
   const missing = validateStoryAgainstTopic(topic, "பானு என்ற குழந்தை தோட்டத்தில் விளையாடினாள்.");
   if (missing.ok) throw new Error("Story with missing named characters was accepted");
 });
