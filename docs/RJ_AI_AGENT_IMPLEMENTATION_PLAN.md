@@ -236,3 +236,38 @@ Provider research:
 Verification:
 - A fresh CI run is in progress for the TTS adapter and tests. Confirm the latest run before describing this batch as passing.
 - No hosted Supabase migration/function deployment, Render deployment, APK build, or `main` merge was performed.
+
+## FFmpeg cloud-rendering foundation — 2026-11-25
+
+Implemented on `feature/rj-full-integration` (source and migration only; not deployed):
+
+- Added an isolated Node 22 Docker worker under `workers/rj-renderer`.
+- Worker polls durable `scene_assets` stages from Supabase, verifies the script stage is complete, and claims the stage through `rj_claim_job_stage` before doing work.
+- Uses FFmpeg to assemble a 1280×720 H.264 MP4 from Tamil-capable vector story cards; Sharp rasterizes SVG cards with Noto fonts.
+- Creates a private MP4, JPEG thumbnail, and SRT captions sidecar in the `rj-renders` Storage bucket.
+- Runs FFprobe to verify that the exported MP4 has a positive duration.
+- Updates scene, voice, captions, edit, render, quality-check, thumbnail, and YouTube stages with explicit outcomes.
+- Marks voice as skipped (no TTS call), YouTube upload/schedule as blocked until a channel is connected, and the job completed once the playable storyboard MP4 exists.
+- App project cards now create one-hour private signed links for playback and captions; the signed URLs are generated only after the user taps the link.
+- Worker has bounded scene count/text length/file size, escaped SVG text, subprocess timeout, private storage paths, structured logs, and graceful SIGTERM/SIGINT handling.
+- Added worker unit tests for Tamil/English scene parsing, XML escaping, text wrapping, SRT timing, and bounded scene duration.
+- CI now installs, tests, and compiles the renderer worker.
+
+### Honest output boundary
+
+The current first renderer produces a silent, text-led storyboard video. It is a real MP4, but it does **not** yet contain AI-generated images, narration, speech-aligned subtitles, or background music. It does not publish to YouTube. The worker labels these limits in job output and stage status rather than pretending those capabilities are complete.
+
+### Provider cost policy
+
+- Gemini 3.1 Flash Lite Image is catalogued as paid-only/disabled; Google's current pricing page lists no free tier (about USD 0.0336 per 1K image).
+- Gemini Omni Flash video is catalogued as paid-only/disabled; Google's current pricing page lists paid-tier output at approximately USD 0.10 per second of 720p video.
+- No image/video generation API calls are made by this worker.
+- FFmpeg itself is open-source, but Render compute and Supabase storage may incur infrastructure charges. The Render worker is not created or deployed; the user must review the current Render plan price and authorize deployment.
+- Migration `20261125008000_rj_render_storage_and_media_catalog.sql` creates a private `rj-renders` bucket and owner-scoped read policy. It is not deployed.
+
+Official provider references:
+- Gemini image model/pricing: https://ai.google.dev/gemini-api/docs/pricing
+- Gemini Omni Flash video model/pricing: https://ai.google.dev/gemini-api/docs/pricing
+- FFmpeg concatenation reference: https://www.ffmpeg.org/faq.html
+
+No Render service, hosted Supabase migration, Edge Function, production deployment, main-branch merge, or APK build was performed.
