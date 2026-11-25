@@ -96,7 +96,7 @@ Deno.serve(async (req: Request) => {
     const tool = body.tool_key;
     const args = safeArguments(tool, body.arguments);
     if (tool === "video.create" && !args.topic) return json({ error: "Video topic is required." }, 400);
-    if (tool === "reminder.create" && (!args.title || !/^([01]?\\d|2[0-3]):[0-5]\\d$/.test(String(args.time)))) {
+    if (tool === "reminder.create" && (!args.title || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(String(args.time)))) {
       return json({ error: "A valid reminder title and 24-hour time are required." }, 400);
     }
     if (tool === "navigation.open" && !args.tab) return json({ error: "A valid RJ screen is required." }, 400);
@@ -128,7 +128,7 @@ Deno.serve(async (req: Request) => {
       || !["succeeded", "failed", "cancelled"].includes(String(status))) {
       return json({ error: "Invalid audit completion request." }, 400);
     }
-    const summary = String(body.result_summary ?? "").replace(/[\\r\\n\\t]/g, " ").slice(0, 240);
+    const summary = String(body.result_summary ?? "").replace(/[\r\n\t]/g, " ").slice(0, 240);
     const { data, error } = await admin.from("agent_action_audit").update({
       status, result_summary: summary || null, finished_at: new Date().toISOString(),
     }).eq("user_id", user.id).eq("request_id", requestId).eq("status", "confirmed")
