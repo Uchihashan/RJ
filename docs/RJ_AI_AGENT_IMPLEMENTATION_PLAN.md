@@ -201,3 +201,19 @@ Verification:
 - CI now runs Deno checks and the provider-registry unit tests, in addition to the Expo/browser checks.
 - Hosted Supabase migrations and Edge Functions remain undeployed. The new migration must be applied before the updated assistant/worker functions can use the policy and attempt-history tables.
 - No main merge, production deploy, or APK build was performed.
+
+## Durable stage-lease update — 2026-11-25
+
+Implemented on `feature/rj-full-integration` (not deployed):
+
+- Added migration `20261125007000_rj_durable_stage_leases.sql` with a server-only `rj_claim_job_stage` RPC.
+- The RPC atomically claims a user-owned pipeline stage, increments its attempt counter, and records a lease timestamp.
+- Concurrent worker/cron invocations cannot both claim the same pending/running stage.
+- Expired running leases can be reclaimed after a bounded interval; legacy running rows with no lease timestamp are also recoverable.
+- The story worker now claims `script_storyboard` before calling any provider and archives duplicate queue deliveries that cannot obtain the stage lease.
+- Stage transitions to blocked, waiting-retry, succeeded, and failed clear the lease.
+
+Verification boundary:
+- The previous provider-routing commit passed the full browser workflow, including TypeScript, Expo config, Expo Doctor, Deno checks/provider tests, browser export, and artifact upload.
+- This new lease migration and worker integration require a fresh CI run; do not claim they are verified until that run succeeds.
+- Database migration remains branch-only and has not been applied to hosted Supabase.
