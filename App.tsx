@@ -709,7 +709,7 @@ export default function App() {
         ))}
       </View>
       <ActionButton title="Queue story generation" onPress={createJob} />
-      <Text style={styles.note}>Story generation runs through RJ’s background queue when a Gemini or OpenRouter key is configured. Voice-over, visuals, subtitles, rendering and YouTube publishing are still separate stages.</Text>
+      <Text style={styles.note}>Story generation runs through RJ’s background queue using OpenRouter Free first and Groq Free as automatic fallback. Voice-over, visuals, subtitles, rendering and YouTube publishing are still separate stages.</Text>
       <View style={styles.divider} />
       <Text style={styles.sectionTitle}>Your video projects</Text>
       {jobs.length === 0 ? <Text style={styles.muted}>No projects yet. Add your first topic above.</Text> : jobs.map(job => (
