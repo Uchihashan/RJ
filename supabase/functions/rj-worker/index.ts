@@ -275,20 +275,35 @@ async function processJob(message: QueueMessage) {
     if (stageStartError) throw stageStartError;
     const { data: attempt, error: attemptError } = await admin
       .from("job_attempts")
-      .insert({ job_id: jobId, provider: provider.name, status: "started" })
+      .insert({ job_id: jobId, provider: provider.label, status: "started" })
       .select("id")
       .single();
     if (attemptError) throw attemptError;
+    const { data: providerAttempt, error: providerAttemptError } = await admin
+      .from("provider_attempts")
+      .insert({
+        user_id: userId,
+        job_id: jobId,
+        stage_key: "script_storyboard",
+        capability: "text",
+        provider_key: provider.key,
+        model_key: provider.model,
+        attempt_number: failures.length + 1,
+        status: "started",
+      })
+      .select("id")
+      .single();
+    if (providerAttemptError) throw providerAttemptError;
 
     let story: string;
     try {
       story = await provider.run();
     } catch (error) {
-      const failure = classifyFailure(provider.name, error);
+      const failure = classifyProviderFailure(error);
       failures.push(failure);
       const cooldown = cooldownUntil(failure, failures.length);
       const { error: healthUpdateError } = await admin.from("provider_health").upsert({
-        user_id: userId, provider_key: provider.providerKey, capability: "text",
+        user_id: userId, provider_key: provider.key, capability: "text",
         state: cooldown ? "cooldown" : "needs_attention",
         cooldown_until: cooldown,
         last_http_status: failure.status,
@@ -303,11 +318,19 @@ async function processJob(message: QueueMessage) {
         finished_at: new Date().toISOString(),
       }).eq("id", attempt.id);
       if (failureUpdateError) throw failureUpdateError;
+      const { error: providerAttemptUpdateError } = await admin.from("provider_attempts").update({
+        status: failure.quota ? "quota_exhausted" : failure.status === 429 ? "rate_limited" : failure.retryable ? "failed" : "needs_attention",
+        http_status: failure.status,
+        error_code: failure.code,
+        safe_error_message: failure.message,
+        finished_at: new Date().toISOString(),
+      }).eq("id", providerAttempt.id);
+      if (providerAttemptUpdateError) throw providerAttemptUpdateError;
       continue;
     }
 
     const { error: healthUpdateError } = await admin.from("provider_health").upsert({
-      user_id: userId, provider_key: provider.providerKey, capability: "text",
+      user_id: userId, provider_key: provider.key, capability: "text",
       state: "available", cooldown_until: null, last_http_status: 200,
       last_error_code: null, updated_at: new Date().toISOString(),
     }, { onConflict: "user_id,provider_key,capability" });
@@ -318,6 +341,12 @@ async function processJob(message: QueueMessage) {
       finished_at: new Date().toISOString(),
     }).eq("id", attempt.id);
     if (attemptUpdateError) throw attemptUpdateError;
+    const { error: providerAttemptSuccessError } = await admin.from("provider_attempts").update({
+      status: "succeeded",
+      http_status: 200,
+      finished_at: new Date().toISOString(),
+    }).eq("id", providerAttempt.id);
+    if (providerAttemptSuccessError) throw providerAttemptSuccessError;
 
     const { error: jobUpdateError } = await admin.from("jobs").update({
       status: "blocked",
@@ -326,7 +355,7 @@ async function processJob(message: QueueMessage) {
       output: {
         stage: "story_ready",
         story,
-        provider: provider.name,
+        provider: provider.label,
         generated_at: new Date().toISOString(),
       },
       error_code: null,
@@ -339,7 +368,7 @@ async function processJob(message: QueueMessage) {
     const now = new Date().toISOString();
     const { error: storyStageError } = await admin.from("job_stages").update({
       status: "succeeded",
-      selected_provider: provider.name,
+      selected_provider: provider.label,
       output: { story_ready: true },
       finished_at: now,
       updated_at: now,
@@ -349,7 +378,7 @@ async function processJob(message: QueueMessage) {
 
     const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
     if (archiveError) throw archiveError;
-    return { job_id: jobId, outcome: "story_ready", provider: provider.name };
+    return { job_id: jobId, outcome: "story_ready", provider: provider.label };
   }
 
   // Retry if at least one configured provider failed transiently; a different provider may have a bad key.
