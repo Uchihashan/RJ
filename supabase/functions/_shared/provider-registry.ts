@@ -52,6 +52,18 @@ export const PROVIDER_CATALOG: readonly ProviderSpec[] = [
     enabled: true,
   },
   {
+    key: "groq_free",
+    label: "Groq Free Tier",
+    capability: "text",
+    model: "openai/gpt-oss-20b",
+    pricingMode: "free_tier",
+    outputFormats: ["text"],
+    credentialKey: "groq",
+    // Use only an API key belonging to a Groq Free-tier organization.
+    // Never upgrade that organization to Developer/PayGo; RJ never performs upgrades.
+    enabled: true,
+  },
+  {
     key: "gemini",
     label: "Google Gemini",
     capability: "text",
