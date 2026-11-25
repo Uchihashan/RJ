@@ -131,6 +131,7 @@ export default function App() {
   const [authOtp, setAuthOtp] = useState("");
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [openRouterKeyInput, setOpenRouterKeyInput] = useState("");
+  const [groqKeyInput, setGroqKeyInput] = useState("");
   const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
   const [providerBusy, setProviderBusy] = useState<string | null>(null);
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
@@ -513,7 +514,7 @@ export default function App() {
     }
   };
 
-  const saveProviderKey = async (provider: "gemini" | "openrouter", value: string) => {
+  const saveProviderKey = async (provider: "gemini" | "openrouter" | "groq", value: string) => {
     if (!supabase || !session) return;
     const apiKey = value.trim();
     if (apiKey.length < 20) {
@@ -529,7 +530,8 @@ export default function App() {
       if (error) throw error;
       setProviderStatus(current => ({ ...current, [provider]: true }));
       if (provider === "gemini") setGeminiKeyInput("");
-      else setOpenRouterKeyInput("");
+      else if (provider === "openrouter") setOpenRouterKeyInput("");
+      else setGroqKeyInput("");
       Alert.alert("Provider saved securely", "The key is encrypted in RJ's backend. Any jobs waiting for a provider will be resumed automatically.");
     } catch (error: any) {
       Alert.alert("Could not save provider", error?.message ?? "RJ could not securely store this API key.");
@@ -840,7 +842,12 @@ export default function App() {
         <Pressable onPress={() => Linking.openURL("https://openrouter.ai/settings/keys")}><Text style={{ color: RED, marginBottom: 10 }}>Get an OpenRouter API key ↗</Text></Pressable>
         <Field label="OpenRouter API key" value={openRouterKeyInput} onChangeText={setOpenRouterKeyInput} placeholder="Paste OpenRouter API key" secureTextEntry />
         <ActionButton title={providerBusy === "openrouter" ? "Saving…" : "Save OpenRouter key"} onPress={() => saveProviderKey("openrouter", openRouterKeyInput)} disabled={providerBusy !== null} />
-        <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ prefers OpenRouter's free-model route. Gemini keys can be stored securely, but Gemini is not used automatically because billing depends on account tier. Paid routing stays disabled until per-request cost metering and spend enforcement are implemented.</Text>
+        <View style={styles.divider} />
+        <Text style={styles.listLine}>Groq Free: <Text style={providerStatus.groq ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.groq ? "Key stored securely" : "Not connected"}</Text></Text>
+        <Pressable onPress={() => Linking.openURL("https://console.groq.com/keys")}><Text style={{ color: RED, marginBottom: 10 }}>Get a Groq API key ↗</Text></Pressable>
+        <Field label="Groq Free API key" value={groqKeyInput} onChangeText={setGroqKeyInput} placeholder="Paste Groq API key" secureTextEntry />
+        <ActionButton title={providerBusy === "groq" ? "Saving…" : "Save Groq Free key"} onPress={() => saveProviderKey("groq", groqKeyInput)} disabled={providerBusy !== null} />
+        <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses OpenRouter Free first, then Groq Free if the first provider is unavailable or quota-limited. Use a Groq Free-tier organization only; never upgrade it to Developer/PayGo. Gemini stays disabled. RJ never switches to paid providers.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Other connections</Text>
