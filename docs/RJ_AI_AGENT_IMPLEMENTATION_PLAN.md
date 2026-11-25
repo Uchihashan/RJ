@@ -149,10 +149,13 @@ This status supersedes earlier audit bullets where they conflict.
 ### Implemented on `feature/rj-full-integration`
 - Authenticated Tamil/Tanglish/English assistant request/response gateway using Gemini with OpenRouter fallback.
 - Per-user provider keys are retrieved server-side through the existing Vault RPC; keys are not bundled in the app.
-- Local app actions for video-project creation, reminder creation, and tab navigation require an explicit confirmation card.
-- Tamil/Tanglish aliases for the supported video/reminder commands; a new message cancels an older unconfirmed action.
+- Local app actions for video-project creation, reminder creation, and tab navigation require an explicit confirmation card; duplicate actions are prevented while a confirmed action runs, and the assistant reports the actual action result.
+- Tamil/Tanglish aliases for supported video, reminder, and navigation commands; a new message cancels an older unconfirmed action.
+- Signed-out video ideas are saved as local drafts and are not misreported as cloud-queued jobs; signed-in jobs use the durable cloud queue.
 - Video project queue and first story-generation worker stage.
-- Durable pipeline-stage schema and initial stage records; worker marks the brief and story stages, then explicitly blocks at scene-assets when no compatible media-generation adapter is connected.
+- Durable pipeline-stage schema, persisted progress display, and stage status tracking for running, blocked, waiting-retry, succeeded, and failed states.
+- Text-provider health and cooldown routing: quota/transient failures cool down a provider, compatible configured text providers are tried as fallback, and paused jobs can resume after a provider key is connected.
+- When no compatible image/video adapter is connected, the worker explicitly blocks at scene-assets rather than claiming a finished video.
 - Agent permission and action-audit schema.
 - Browser-only private CI artifact workflow; no public web deployment.
 - Reminder validation uses the requested reminder time, not the screen's default time.
