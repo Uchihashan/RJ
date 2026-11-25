@@ -430,7 +430,7 @@ async function renderStoryboard(db: SupabaseClient, job: JobRow): Promise<{
       voiceModel,
       sceneCount: scenes.length,
       durationSeconds,
-      visualMode: imageCount ? "cloudflare_flux_schnell_with_vector_fallback" : "vector_story_cards",
+      visualMode: imageCount ? "cloudflare_flux_schnell_with_ken_burns_motion" : "vector_story_cards_with_ken_burns_motion",
       imageCount,
       sceneAssets: sceneAssets.map((asset, index) => ({ ...asset, durationSeconds: sceneDurations[index] ?? sceneDurationSeconds(scenes[index]!) })),
     };
@@ -529,7 +529,7 @@ async function processStage(db: SupabaseClient, stage: StageRow) {
     await updateStage(db, job.id, "timeline_edit", {
       status: "succeeded",
       selected_provider: "ffmpeg",
-      output: { codec: "h264", width: 1280, height: 720, fps: 30, audio: Boolean(result.narration), audio_codec: result.narration ? "aac" : null },
+      output: { codec: "h264", width: 1280, height: 720, fps: 30, audio: Boolean(result.narration), audio_codec: result.narration ? "aac" : null, motion_engine: "ffmpeg_ken_burns" },
       finished_at: now,
       error_code: null,
       error_message: null,
