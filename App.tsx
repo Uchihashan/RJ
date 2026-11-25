@@ -771,6 +771,7 @@ export default function App() {
       <Text style={styles.sectionTitle}>YouTube video studio</Text>
       <Text style={styles.muted}>Enter a heading or story idea. RJ will save it as a project.</Text>
       <Field label="Video heading / topic" value={topic} onChangeText={setTopic} placeholder="Example: குட்டி யானையின் நல்ல மனசு" multiline />
+      <Text style={styles.note}>Only this topic field is sent to story generation. Include character names, animal types, plot details and duration here; chat history and older projects are not copied into a new project.</Text>
       <Text style={styles.fieldLabel}>Video language</Text>
       <View style={styles.choiceRow}>
         {["Tamil", "Tanglish", "English"].map(item => (
