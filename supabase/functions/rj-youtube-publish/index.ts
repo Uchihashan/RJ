@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
         });
       }
       await admin.from("job_stages").update({
-        status: "succeeded", output: { youtube_video_id: render.youtube_video_id, youtube_url: render.youtube_url, privacy_status: "private" },
+        status: "succeeded", locked_at: null, output: { youtube_video_id: render.youtube_video_id, youtube_url: render.youtube_url, privacy_status: "private" },
         error_code: null, error_message: null, finished_at: new Date().toISOString(),
       }).eq("job_id", jobId).eq("user_id", auth.user.id).eq("stage_key", "youtube_upload");
       return json({ ok: true, video_id: render.youtube_video_id, video_url: render.youtube_url, already_uploaded: true });
@@ -108,7 +108,7 @@ Deno.serve(async (req: Request) => {
     if (reserveError) throw reserveError;
     if (reservation?.allowed !== true) {
       await admin.from("job_stages").update({
-        status: "blocked", error_code: reservation?.reason ?? "daily_limit_reached",
+        status: "blocked", locked_at: null, error_code: reservation?.reason ?? "daily_limit_reached",
         error_message: "Daily YouTube upload limit reached or this video was already published.",
         output: { daily_limit: reservation?.limit ?? 2, used: reservation?.used ?? 2, remaining: reservation?.remaining ?? 0 },
         updated_at: new Date().toISOString(),
@@ -184,7 +184,7 @@ Deno.serve(async (req: Request) => {
     if (completeError) throw completeError;
     reserved = false;
     await admin.from("job_stages").update({
-      status: "succeeded", selected_provider: "youtube_data_api_v3",
+      status: "succeeded", locked_at: null, selected_provider: "youtube_data_api_v3",
       output: { youtube_video_id: videoId, youtube_url: videoUrl, privacy_status: "private", file_size_bytes: videoBlob.size },
       error_code: null, error_message: null, finished_at: now, updated_at: now,
     }).eq("job_id", jobId).eq("user_id", auth.user.id).eq("stage_key", "youtube_upload");
@@ -200,7 +200,7 @@ Deno.serve(async (req: Request) => {
       });
     }
     await admin.from("job_stages").update({
-      status: "failed", error_code: "youtube_upload_failed", error_message: message.slice(0, 500),
+      status: "failed", locked_at: null, error_code: "youtube_upload_failed", error_message: message.slice(0, 500),
       finished_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     }).eq("job_id", jobId).eq("user_id", auth.user.id).eq("stage_key", "youtube_upload");
     if (auditId) await admin.from("agent_action_audit").update({
