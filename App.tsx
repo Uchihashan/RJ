@@ -128,6 +128,7 @@ export default function App() {
   const [unlockPin, setUnlockPin] = useState("");
   const [session, setSession] = useState<any>(null);
   const [youtubeConnection, setYoutubeConnection] = useState<"unknown" | "connected" | "denied" | "error">("unknown");
+  const [youtubeChannelTitle, setYoutubeChannelTitle] = useState<string | null>(null);
   const [youtubeBusy, setYoutubeBusy] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
@@ -916,7 +917,7 @@ export default function App() {
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Other connections</Text>
-        <Text style={styles.listLine}>YouTube account: <Text style={youtubeConnection === "connected" ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{youtubeConnection === "connected" ? "Connected in this session" : youtubeConnection === "denied" ? "Not connected" : "Not connected"}</Text></Text>
+        <Text style={styles.listLine}>YouTube account: <Text style={youtubeConnection === "connected" ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{youtubeConnection === "connected" ? (youtubeChannelTitle ?? "Connected") : "Not connected"}</Text></Text>
         <ActionButton title={youtubeBusy ? "Opening Google…" : youtubeConnection === "connected" ? "Connect another YouTube channel" : "Connect YouTube channel"} onPress={connectYoutube} disabled={youtubeBusy || !session} />
         <Text style={styles.listLine}>Cloud sync: <Text style={{ color: "#53C98B", fontWeight: "700" }}>Connected</Text></Text>
         <Text style={styles.note}>YouTube OAuth, multi-channel publishing and scheduling are the remaining major pipeline stages.</Text>
