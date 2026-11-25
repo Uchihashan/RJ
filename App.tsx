@@ -22,7 +22,7 @@ import AssistantScreen from "./src/components/AssistantScreen";
 import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
 type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
-type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; sceneAssetCount?: number; hasNarration?: boolean };
+type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; sceneAssetCount?: number; hasNarration?: boolean; youtubeVideoId?: string };
 type PipelineStage = { job_id: string; stage_key: string; stage_order: number; status: string; selected_provider?: string | null; error_message?: string | null };
 const PIPELINE_STAGE_LABELS: Record<string, string> = { brief: "Brief", script_storyboard: "Story & script", scene_assets: "Visual scenes", voice_audio: "Voice-over", captions: "Captions", timeline_edit: "Timeline edit", render_export: "Render video", quality_check: "Quality check", metadata_thumbnail: "Title & thumbnail", youtube_upload: "YouTube upload", youtube_schedule_verify: "Schedule verification" };
 
@@ -46,7 +46,7 @@ function jobStatusLabel(row: any): string {
   return row.status;
 }
 type Reminder = { id: string; title: string; time: string; notificationId: string | null };
-type AgentToolKey = "video.create" | "reminder.create" | "navigation.open";
+type AgentToolKey = "video.create" | "reminder.create" | "navigation.open" | "youtube.upload";
 
 if (Platform.OS !== "web") {
   Notifications.setNotificationHandler({
@@ -127,6 +127,10 @@ export default function App() {
   const [locked, setLocked] = useState(false);
   const [unlockPin, setUnlockPin] = useState("");
   const [session, setSession] = useState<any>(null);
+  const [youtubeConnection, setYoutubeConnection] = useState<"unknown" | "connected" | "denied" | "error">("unknown");
+  const [youtubeChannelTitle, setYoutubeChannelTitle] = useState<string | null>(null);
+  const [youtubeBusy, setYoutubeBusy] = useState(false);
+  const [youtubeUploadingJobId, setYoutubeUploadingJobId] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -168,6 +172,23 @@ export default function App() {
       appStateSubscription.remove();
     };
   }, []);
+
+
+  useEffect(() => {
+    if (!session || !supabase) {
+      setYoutubeConnection("unknown");
+      setYoutubeChannelTitle(null);
+      return;
+    }
+    let active = true;
+    supabase.functions.invoke("rj-youtube-oauth", { body: { action: "status" } }).then(({ data, error }) => {
+      if (!active) return;
+      if (error) { setYoutubeConnection("unknown"); return; }
+      setYoutubeConnection(data?.connected ? "connected" : "unknown");
+      setYoutubeChannelTitle(typeof data?.channel_title === "string" ? data.channel_title : null);
+    }).catch(() => { if (active) setYoutubeConnection("unknown"); });
+    return () => { active = false; };
+  }, [session]);
 
   useEffect(() => {
     if (!authReady || !dataLoaded) return;
@@ -223,7 +244,8 @@ export default function App() {
         renderMode: typeof row.output?.render?.visual_mode === "string" ? row.output.render.visual_mode : undefined,
         generatedImageCount: typeof row.output?.render?.generated_image_count === "number" ? row.output.render.generated_image_count : undefined,
         sceneAssetCount: typeof row.output?.render?.scene_asset_count === "number" ? row.output.render.scene_asset_count : undefined,
-        hasNarration: row.output?.render?.audio === true
+        hasNarration: row.output?.render?.audio === true,
+        youtubeVideoId: typeof row.output?.render?.youtube_video_id === "string" ? row.output.render.youtube_video_id : undefined
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
       if (active) {
@@ -388,6 +410,30 @@ export default function App() {
       body: { action: "finish_action", request_id: requestId, status, result_summary: summary },
     });
     if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? "RJ could not complete the action audit.");
+  };
+
+
+  const approveYoutubeUpload = (job: Job) => {
+    Alert.alert(
+      "Approve YouTube upload?",
+      "RJ will upload this rendered kids video to your connected YouTube channel as PRIVATE. It will not be public. This uses one daily upload slot.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Approve & upload privately", onPress: async () => {
+          try {
+            await beginAgentAction("youtube.upload", { job_id: job.id });
+            setYoutubeUploadingJobId(job.id);
+            const { data, error } = await supabase!.functions.invoke("rj-youtube-publish", { body: { job_id: job.id } });
+            if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? "YouTube upload failed.");
+            setJobs(current => current.map(item => item.id === job.id ? { ...item, youtubeVideoId: String(data.video_id) } : item));
+            Alert.alert("YouTube upload complete", "Video uploaded as PRIVATE. Open YouTube Studio to review it before making it public.");
+
+          } catch (error: any) {
+            Alert.alert("Upload not completed", error?.message ?? "Enable YouTube upload permission and connect a channel first.");
+          } finally { setYoutubeUploadingJobId(null); }
+        } }
+      ]
+    );
   };
 
   const createJob = async (requestedTopic?: string, requestedLanguage?: string): Promise<string> => {
@@ -684,6 +730,19 @@ export default function App() {
     }
   };
 
+
+  const connectYoutube = async () => {
+    if (!supabase || !session) { Alert.alert("Sign in required", "Sign in to RJ before connecting YouTube."); return; }
+    setYoutubeBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("rj-youtube-oauth", { body: { action: "start" } });
+      if (error || !data?.authorization_url) throw new Error(data?.error ?? error?.message ?? "Could not start YouTube OAuth.");
+      await Linking.openURL(data.authorization_url);
+    } catch (error: any) {
+      Alert.alert("YouTube setup unavailable", error?.message ?? "Could not start YouTube connection.");
+    } finally { setYoutubeBusy(false); }
+  };
+
   const renderHome = () => (
     <>
       <View style={styles.hero}>
@@ -734,6 +793,13 @@ export default function App() {
               <Text style={styles.muted}>
                 {job.renderDuration ? Math.round(job.renderDuration) + " sec" : "Rendered"} • {job.generatedImageCount ? job.generatedImageCount + " AI images" : "Local scene artwork"} • {job.sceneAssetCount ? job.sceneAssetCount + " saved scene images" : "No saved scene assets"} • Ken Burns motion • {job.hasNarration ? "Tamil narration" : "No narration"}
               </Text>
+              {job.youtubeVideoId ? (
+                <Pressable onPress={() => Linking.openURL("https://www.youtube.com/watch?v=" + job.youtubeVideoId)}>
+                  <Text style={{ color: "#53C98B", marginTop: 8, fontWeight: "700" }}>Uploaded privately — open YouTube video</Text>
+                </Pressable>
+              ) : session ? (
+                <ActionButton title={youtubeUploadingJobId === job.id ? "Uploading to YouTube…" : "Approve & upload privately to YouTube"} onPress={() => approveYoutubeUpload(job)} secondary disabled={youtubeUploadingJobId !== null} />
+              ) : null}
               <Pressable onPress={async () => {
                 if (!supabase) return;
                 const { data, error } = await supabase.storage.from("rj-renders").createSignedUrl(job.renderPath!, 3600);
@@ -827,6 +893,7 @@ export default function App() {
           ["video.create", "Create video project"],
           ["reminder.create", "Save reminder"],
           ["navigation.open", "Open app screens"],
+          ["youtube.upload", "Upload approved video privately to YouTube"],
         ] as [AgentToolKey, string][]).map(([key, label]) => (
           <View key={key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9 }}>
             <View style={{ flex: 1, paddingRight: 10 }}>
@@ -873,7 +940,8 @@ export default function App() {
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Other connections</Text>
-        <Text style={styles.listLine}>YouTube account: <Text style={styles.pending}>Not connected</Text></Text>
+        <Text style={styles.listLine}>YouTube account: <Text style={youtubeConnection === "connected" ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{youtubeConnection === "connected" ? (youtubeChannelTitle ?? "Connected") : "Not connected"}</Text></Text>
+        <ActionButton title={youtubeBusy ? "Opening Google…" : youtubeConnection === "connected" ? "Connect another YouTube channel" : "Connect YouTube channel"} onPress={connectYoutube} disabled={youtubeBusy || !session} />
         <Text style={styles.listLine}>Cloud sync: <Text style={{ color: "#53C98B", fontWeight: "700" }}>Connected</Text></Text>
         <Text style={styles.note}>YouTube OAuth, multi-channel publishing and scheduling are the remaining major pipeline stages.</Text>
       </View>

@@ -59,8 +59,12 @@ jobs:
         with:
           deno-version: v2.1.4
 
-      - name: Type-check Supabase Edge Function
-        run: deno check supabase/functions/rj-worker/index.ts
+      - name: Type-check Supabase Edge Functions
+        run: |
+          deno check supabase/functions/rj-worker/index.ts
+          deno check supabase/functions/rj-agent-actions/index.ts
+          deno check supabase/functions/rj-youtube-oauth/index.ts
+          deno check supabase/functions/rj-youtube-publish/index.ts
 
       - name: Export Android bundle
         run: npx expo export --platform android --output-dir dist

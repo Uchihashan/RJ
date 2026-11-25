@@ -107,7 +107,7 @@ async function claimStage(db: SupabaseClient, stage: StageRow): Promise<boolean>
 async function loadReadyStages(db: SupabaseClient): Promise<StageRow[]> {
   const { data, error } = await db.from("job_stages")
     .select("job_id,user_id,stage_key,attempt_count")
-    .eq("stage_key", "scene_assets")
+    .in("stage_key", ["scene_assets", "youtube_upload"])
     .in("status", ["pending", "queued", "waiting_retry", "blocked"])
     .lte("run_after", new Date().toISOString())
     .order("run_after", { ascending: true })
@@ -453,7 +453,195 @@ async function uploadAsset(
   if (error) throw error;
 }
 
+
+async function refreshYoutubeAccessToken(refreshToken: string): Promise<string> {
+  const clientId = process.env.YOUTUBE_OAUTH_CLIENT_ID ?? "";
+  const clientSecret = process.env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "";
+  if (!clientId || !clientSecret) throw new Error("YouTube OAuth client credentials are not configured");
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId, client_secret: clientSecret,
+      refresh_token: refreshToken, grant_type: "refresh_token",
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || typeof body.access_token !== "string") {
+    throw new Error("Google rejected the YouTube refresh token (" + response.status + ")");
+  }
+  return body.access_token;
+}
+
+async function uploadPrivateYoutubeVideo(accessToken: string, video: Buffer, title: string, description: string) {
+  const metadata = {
+    snippet: { title: title.slice(0, 100), description: description.slice(0, 4500), categoryId: "22" },
+    status: { privacyStatus: "private", selfDeclaredMadeForKids: true },
+  };
+  const init = await fetch("https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet%2Cstatus", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + accessToken,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Type": "video/mp4",
+      "X-Upload-Content-Length": String(video.length),
+    },
+    body: JSON.stringify(metadata),
+  });
+  const uploadUrl = init.headers.get("location");
+  if (!init.ok || !uploadUrl) {
+    const detail = await init.text().catch(() => "");
+    throw new Error("YouTube upload session could not be created (" + init.status + "): " + detail.slice(0, 300));
+  }
+  const uploadBody = new ArrayBuffer(video.length);
+  new Uint8Array(uploadBody).set(video);
+  const uploaded = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "video/mp4", "Content-Length": String(video.length) },
+    body: uploadBody,
+  });
+  const body = await uploaded.json().catch(() => ({}));
+  if (!uploaded.ok || typeof body.id !== "string") {
+    throw new Error("YouTube video upload failed (" + uploaded.status + ")");
+  }
+  return String(body.id);
+}
+
+async function processYoutubeUpload(db: SupabaseClient, stage: StageRow): Promise<string> {
+  if (!(await claimStage(db, stage))) return "already_claimed";
+  activeJob = true;
+  let reserved = false;
+  let channelRef = "";
+  try {
+    const job = await loadJob(db, stage);
+    const jobOutput = (job?.output ?? {}) as Record<string, any>;
+    const render = (jobOutput.render ?? {}) as Record<string, any>;
+    if (!job || job.status !== "completed" || typeof render.video_path !== "string") {
+      await updateStage(db, stage.job_id, "youtube_upload", {
+        status: "blocked", error_code: "render_not_ready",
+        error_message: "The rendered video is not ready to upload.",
+      });
+      return "render_not_ready";
+    }
+
+    const { data: approval, error: approvalError } = await db.from("agent_action_audit")
+      .select("id,safe_arguments")
+      .eq("user_id", job.user_id).eq("tool_key", "youtube.upload").eq("status", "confirmed")
+      .contains("safe_arguments", { job_id: job.id })
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (approvalError) throw approvalError;
+    if (!approval) {
+      await updateStage(db, job.id, "youtube_upload", {
+        status: "blocked", error_code: "user_approval_required",
+        error_message: "RJ will upload only after you approve this exact video in the app.",
+      });
+      return "approval_required";
+    }
+
+    const { data: channel, error: channelError } = await db.from("youtube_channels")
+      .select("id")
+      .eq("user_id", job.user_id).eq("is_active", true)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (channelError) throw channelError;
+    if (!channel) {
+      await updateStage(db, job.id, "youtube_upload", {
+        status: "blocked", error_code: "youtube_not_connected",
+        error_message: "Connect a YouTube channel before publishing.",
+      });
+      return "youtube_not_connected";
+    }
+    channelRef = channel.id;
+
+    const alreadyUploaded = typeof render.youtube_video_id === "string" ? render.youtube_video_id : "";
+    if (alreadyUploaded) {
+      const { error: completeError } = await db.rpc("rj_complete_youtube_upload", {
+        p_user_id: job.user_id, p_channel_ref: channelRef, p_job_id: job.id,
+        p_youtube_video_id: alreadyUploaded,
+      });
+      if (completeError) throw completeError;
+      await updateStage(db, job.id, "youtube_upload", {
+        status: "succeeded", output: { youtube_video_id: alreadyUploaded, privacy_status: "private", recovered: true },
+        finished_at: new Date().toISOString(), error_code: null, error_message: null,
+      });
+      await db.from("agent_action_audit").update({ status: "succeeded", result_summary: "YouTube video uploaded privately: " + alreadyUploaded, finished_at: new Date().toISOString() }).eq("id", approval.id);
+      return "upload_recovered";
+    }
+
+    const { data: reservation, error: reserveError } = await db.rpc("rj_reserve_youtube_upload", {
+      p_user_id: job.user_id, p_channel_ref: channelRef, p_job_id: job.id,
+    });
+    if (reserveError) throw reserveError;
+    if (reservation?.allowed !== true) {
+      await updateStage(db, job.id, "youtube_upload", {
+        status: "blocked",
+        error_code: reservation?.reason ?? "daily_upload_limit_reached",
+        error_message: reservation?.reason === "daily_limit_reached"
+          ? "Daily YouTube upload limit reached. Try again after the channel-local day resets."
+          : "YouTube upload is not available for this job.",
+        output: { daily_limit: reservation?.limit ?? 2, used: reservation?.used ?? 2, remaining: reservation?.remaining ?? 0 },
+      });
+      return "daily_limit_or_reservation_blocked";
+    }
+    reserved = true;
+
+    const { data: refreshToken, error: tokenError } = await db.rpc("rj_get_youtube_refresh_token", { p_channel_ref: channelRef });
+    if (tokenError || typeof refreshToken !== "string" || !refreshToken) throw new Error("RJ could not load the YouTube refresh token from Supabase Vault");
+    const accessToken = await refreshYoutubeAccessToken(refreshToken);
+    const { data: videoBlob, error: downloadError } = await db.storage.from(BUCKET).download(String(render.video_path));
+    if (downloadError || !videoBlob) throw new Error("RJ could not read the rendered video from private storage");
+    const video = Buffer.from(await videoBlob.arrayBuffer());
+    if (!video.length || video.length > 450 * 1024 * 1024) throw new Error("Rendered video size is outside the supported upload range");
+
+    const title = String(job.input?.topic ?? "RJ Kids Story");
+    const description = "A children's story created with RJ.\n\n#KidsStories #TamilStories #RJ";
+    const videoId = await uploadPrivateYoutubeVideo(accessToken, video, title, description);
+
+    const updatedOutput = {
+      ...jobOutput,
+      render: { ...render, youtube_video_id: videoId, youtube_url: "https://www.youtube.com/watch?v=" + videoId, youtube_status: "uploaded_private" },
+    };
+    const { error: saveError } = await db.from("jobs").update({
+      output: updatedOutput, current_stage: "youtube_upload", updated_at: new Date().toISOString(),
+    }).eq("id", job.id).eq("user_id", job.user_id);
+    if (saveError) throw saveError;
+
+    const { error: completeError } = await db.rpc("rj_complete_youtube_upload", {
+      p_user_id: job.user_id, p_channel_ref: channelRef, p_job_id: job.id, p_youtube_video_id: videoId,
+    });
+    if (completeError) throw completeError;
+    reserved = false;
+
+    await updateStage(db, job.id, "youtube_upload", {
+      status: "succeeded", selected_provider: "youtube_data_api_v3",
+      output: { youtube_video_id: videoId, youtube_url: "https://www.youtube.com/watch?v=" + videoId, privacy_status: "private", file_size_bytes: video.length },
+      finished_at: new Date().toISOString(), error_code: null, error_message: null,
+    });
+    await db.from("agent_action_audit").update({
+      status: "succeeded", result_summary: "Uploaded privately to YouTube: " + videoId,
+      finished_at: new Date().toISOString(),
+    }).eq("id", approval.id);
+    log("youtube_upload_completed", { job_id: job.id, video_id: videoId, privacy_status: "private", bytes: video.length });
+    return "youtube_uploaded_private";
+  } catch (error) {
+    if (reserved && channelRef) {
+      await db.rpc("rj_release_youtube_upload", {
+        p_user_id: stage.user_id, p_channel_ref: channelRef, p_job_id: stage.job_id,
+      });
+    }
+    const message = error instanceof Error ? error.message : "YouTube upload failed";
+    await updateStage(db, stage.job_id, "youtube_upload", {
+      status: "failed", error_code: "youtube_upload_failed",
+      error_message: message.slice(0, 500), finished_at: new Date().toISOString(),
+    });
+    log("youtube_upload_failed", { job_id: stage.job_id, error: message.slice(0, 300) });
+    return "youtube_upload_failed";
+  } finally {
+    activeJob = false;
+  }
+}
+
 async function processStage(db: SupabaseClient, stage: StageRow) {
+  if (stage.stage_key === "youtube_upload") return await processYoutubeUpload(db, stage);
   if (!(await storyStageIsReady(db, stage.job_id))) return "story_not_ready";
   const claimed = await claimStage(db, stage);
   if (!claimed) return "already_claimed";

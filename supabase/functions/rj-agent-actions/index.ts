@@ -32,6 +32,7 @@ function safeArguments(tool: ToolKey, value: unknown): Record<string, unknown> {
     title: String(input.title ?? "").trim().slice(0, 120),
     time: String(input.time ?? "").slice(0, 5),
   };
+  if (tool === "youtube.upload") return { job_id: String(input.job_id ?? "").trim() };
   if (tool === "navigation.open") {
     const tab = String(input.tab ?? "");
     return { tab: ["Home", "Create", "Edit", "Tools", "Schedule", "Settings"].includes(tab) ? tab : "" };
@@ -96,10 +97,22 @@ Deno.serve(async (req: Request) => {
     const tool = body.tool_key;
     const args = safeArguments(tool, body.arguments);
     if (tool === "video.create" && !args.topic) return json({ error: "Video topic is required." }, 400);
+    if (tool === "youtube.upload" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(args.job_id ?? ""))) return json({ error: "A valid rendered video project is required." }, 400);
     if (tool === "reminder.create" && (!args.title || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(String(args.time)))) {
       return json({ error: "A valid reminder title and 24-hour time are required." }, 400);
     }
     if (tool === "navigation.open" && !args.tab) return json({ error: "A valid RJ screen is required." }, 400);
+
+    if (tool === "youtube.upload") {
+      const { data: uploadJob, error: uploadJobError } = await admin.from("jobs")
+        .select("id,status,output")
+        .eq("id", String(args.job_id)).eq("user_id", user.id)
+        .eq("job_type", "video_generation").maybeSingle();
+      if (uploadJobError) return json({ error: "Could not verify the video project." }, 500);
+      if (!uploadJob || uploadJob.status !== "completed" || typeof uploadJob.output?.render?.video_path !== "string") {
+        return json({ error: "Only a completed rendered video can be approved for upload." }, 409);
+      }
+    }
 
     const requestId = crypto.randomUUID();
     const { data: permission, error: permissionError } = await admin.from("agent_tool_permissions")
@@ -126,6 +139,13 @@ Deno.serve(async (req: Request) => {
       status: "confirmed", result_summary: "User confirmed in RJ app.",
     }).eq("user_id", user.id).eq("request_id", requestId).eq("status", "proposed");
     if (confirmError) return json({ error: "RJ could not confirm the action audit; no action was run." }, 500);
+    if (tool === "youtube.upload") {
+      const { error: stageError } = await admin.from("job_stages").update({
+        status: "pending", locked_at: null, error_code: null, error_message: null, run_after: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("job_id", String(args.job_id)).eq("user_id", user.id).eq("stage_key", "youtube_upload");
+      if (stageError) return json({ error: "Approval was recorded, but RJ could not queue the upload stage." }, 500);
+    }
     return json({ ok: true, request_id: requestId, tool_key: tool });
   }
 

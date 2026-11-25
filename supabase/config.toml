@@ -5,3 +5,4 @@ verify_jwt = false
 
 [functions.rj-assistant]
 verify_jwt = true
+\n[functions.rj-youtube-oauth]\nverify_jwt = false\n
