@@ -1,7 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { spawn } from "node:child_process";
-import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -12,7 +11,6 @@ import {
   splitStoryIntoScenes,
 } from "./pipeline.js";
 
-const execFile = promisify(spawn);
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const BUCKET = process.env.RJ_RENDER_BUCKET ?? "rj-renders";
@@ -55,10 +53,22 @@ async function runCommand(command: string, args: string[], cwd: string): Promise
     const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) child.kill("SIGKILL");
+    }, 10 * 60_000);
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout = (stdout + chunk).slice(-20_000); });
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-20_000); });
-    child.once("error", reject);
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.once("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       if (code === 0) resolve(stdout);
       else reject(new Error(`${command} exited ${code}: ${stderr.slice(-2_000)}`));
     });
