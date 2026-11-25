@@ -85,10 +85,10 @@ begin
     select j.id, j.user_id
     from public.jobs j
     where j.status = 'paused'
-      and j.error_code = 'provider_not_configured'
+      and j.error_code in ('provider_not_configured', 'paid_provider_consent_required')
       and exists (
         select 1 from private.rj_provider_credentials c
-        where c.user_id = j.user_id and c.provider in ('gemini', 'openrouter', 'groq')
+        where c.user_id = j.user_id and c.provider in ('openrouter', 'groq')
       )
     order by j.created_at
     limit least(greatest(coalesce(p_limit, 5), 1), 10)
