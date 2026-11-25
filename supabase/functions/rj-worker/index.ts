@@ -5,6 +5,7 @@ import {
   selectEligibleProviders,
   type ProviderHealth,
 } from "../_shared/provider-registry.ts";
+import { buildStoryPrompt, buildStoryRepairPrompt, validateStoryAgainstTopic } from "../_shared/story-validation.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 // Prefer the modern secret key; omit Authorization because secret keys belong in apikey only.
@@ -37,21 +38,7 @@ function response(body: unknown, status = 200) {
   });
 }
 
-function buildPrompt(topic: string, language: string) {
-  return `Create an original, age-appropriate children's story for a YouTube video.
-Topic: ${topic}
-Language: ${language}
-Requirements:
-- Write in natural ${language}; keep names and sentences easy for children.
-- Aim for a 4–6 minute narration.
-- Start with an engaging title and a short hook.
-- Divide the story into 6–8 clearly numbered scenes.
-- For every scene provide: visual description, narrator voice-over, and any short dialogue.
-- Finish with a gentle positive moral and a short closing line.
-- Keep it kind, safe, non-frightening, and suitable for children.
-- Do not use copyrighted characters, existing story plots, or song lyrics.
-Return only the complete story script as readable text.`;
-}
+
 
 async function callGemini(apiKey: string, prompt: string): Promise<string> {
   const controller = new AbortController();
@@ -266,13 +253,16 @@ async function processJob(message: QueueMessage) {
     .eq("capability", "text");
   if (healthError) throw healthError;
   const eligible = selectEligibleProviders("text", credentialMap, (healthRows ?? []) as ProviderHealth[], policy);
-  const prompt = buildPrompt(String(job.input?.topic ?? ""), String(job.input?.language ?? "Tamil"));
+  const topic = String(job.input?.topic ?? "").trim();
+  const language = String(job.input?.language ?? "Tamil");
+  if (!topic) throw new Error("Video project has no saved topic; refusing to generate an unrelated story.");
+  const prompt = buildStoryPrompt(topic, language);
   const providers = eligible.map((spec) => ({
     ...spec,
-    run: () => {
-      if (spec.key === "groq_free") return callGroqFree(credentialMap.get("groq")!, prompt);
-      if (spec.key === "gemini") return callGemini(credentialMap.get("gemini")!, prompt);
-      if (spec.key === "openrouter") return callOpenRouterFree(credentialMap.get("openrouter")!, prompt);
+    run: (promptOverride = prompt) => {
+      if (spec.key === "groq_free") return callGroqFree(credentialMap.get("groq")!, promptOverride);
+      if (spec.key === "gemini") return callGemini(credentialMap.get("gemini")!, promptOverride);
+      if (spec.key === "openrouter") return callOpenRouterFree(credentialMap.get("openrouter")!, promptOverride);
       throw new Error("No adapter is implemented for provider " + spec.key);
     },
   }));
@@ -360,8 +350,21 @@ async function processJob(message: QueueMessage) {
     if (providerAttemptError) throw providerAttemptError;
 
     let story: string;
+    let topicValidation: ReturnType<typeof validateStoryAgainstTopic>;
     try {
       story = await provider.run();
+      topicValidation = validateStoryAgainstTopic(topic, story);
+      if (!topicValidation.ok) {
+        // One bounded repair attempt on the same free provider before trying the fallback.
+        story = await provider.run(buildStoryRepairPrompt(prompt, topicValidation.missingAnchors));
+        topicValidation = validateStoryAgainstTopic(topic, story);
+      }
+      if (!topicValidation.ok) {
+        throw Object.assign(
+          new Error("Story did not follow the requested topic. Missing: " + topicValidation.missingAnchors.join(", ")),
+          { status: 422 },
+        );
+      }
     } catch (error) {
       const failure = classifyProviderFailure(error);
       failures.push(failure);
@@ -420,6 +423,11 @@ async function processJob(message: QueueMessage) {
         stage: "story_ready",
         story,
         provider: provider.label,
+        topic_validation: {
+          ok: topicValidation.ok,
+          required_anchors: topicValidation.requiredAnchors,
+          checked_at: new Date().toISOString(),
+        },
         generated_at: new Date().toISOString(),
       },
       error_code: null,
