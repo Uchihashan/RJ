@@ -134,6 +134,7 @@ export default function App() {
   const [groqKeyInput, setGroqKeyInput] = useState("");
   const [cloudflareAccountInput, setCloudflareAccountInput] = useState("");
   const [cloudflareTokenInput, setCloudflareTokenInput] = useState("");
+  const [cloudflareFreePlanConfirmed, setCloudflareFreePlanConfirmed] = useState(false);
   const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
   const [providerBusy, setProviderBusy] = useState<string | null>(null);
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
@@ -534,7 +535,7 @@ export default function App() {
       if (provider === "gemini") setGeminiKeyInput("");
       else if (provider === "openrouter") setOpenRouterKeyInput("");
       else if (provider === "groq") setGroqKeyInput("");
-      else { setCloudflareAccountInput(""); setCloudflareTokenInput(""); }
+      else { setCloudflareAccountInput(""); setCloudflareTokenInput(""); setCloudflareFreePlanConfirmed(false); }
       Alert.alert("Provider saved securely", "The key is encrypted in RJ's backend. Any jobs waiting for a provider will be resumed automatically.");
     } catch (error: any) {
       Alert.alert("Could not save provider", error?.message ?? "RJ could not securely store this API key.");
@@ -855,7 +856,10 @@ export default function App() {
         <Pressable onPress={() => Linking.openURL("https://dash.cloudflare.com/profile/api-tokens")}><Text style={{ color: RED, marginBottom: 10 }}>Create a Cloudflare API token ↗</Text></Pressable>
         <Field label="Cloudflare Account ID" value={cloudflareAccountInput} onChangeText={setCloudflareAccountInput} placeholder="Account ID" secureTextEntry />
         <Field label="Cloudflare API token (Workers AI:Read)" value={cloudflareTokenInput} onChangeText={setCloudflareTokenInput} placeholder="Paste scoped API token" secureTextEntry />
-        <ActionButton title={providerBusy === "cloudflare" ? "Saving…" : "Save Cloudflare Free credentials"} onPress={() => saveProviderKey("cloudflare", cloudflareAccountInput.trim() + ":" + cloudflareTokenInput.trim())} disabled={providerBusy !== null || cloudflareAccountInput.trim().length < 20 || cloudflareTokenInput.trim().length < 20} />
+        <Pressable onPress={() => setCloudflareFreePlanConfirmed(value => !value)} style={{ paddingVertical: 10 }}>
+          <Text style={styles.listLine}>{cloudflareFreePlanConfirmed ? "☑" : "☐"} I confirm this Cloudflare account is on the Workers Free plan (not Workers Paid).</Text>
+        </Pressable>
+        <ActionButton title={providerBusy === "cloudflare" ? "Saving…" : "Save Cloudflare Free credentials"} onPress={() => saveProviderKey("cloudflare", cloudflareAccountInput.trim() + ":" + cloudflareTokenInput.trim())} disabled={providerBusy !== null || !cloudflareFreePlanConfirmed || cloudflareAccountInput.trim().length < 20 || cloudflareTokenInput.trim().length < 20} />
         <Text style={styles.note}>IMPORTANT: Only connect this on Cloudflare Workers Free plan. Workers AI has 10,000 free Neurons/day there and hard-stops after the limit. Workers Paid accounts can be charged above the free quota; RJ will not use them. Keys are encrypted in Supabase Vault. If image quota is exhausted, RJ uses free local vector artwork.</Text>
                 <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses OpenRouter Free first, then Groq Free if the first provider is unavailable or quota-limited. Use a Groq Free-tier organization only; never upgrade it to Developer/PayGo. Gemini stays disabled. RJ never switches to paid providers.</Text>
       </View>
