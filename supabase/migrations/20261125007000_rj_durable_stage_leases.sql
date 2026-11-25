@@ -36,8 +36,10 @@ begin
        status in ('pending', 'queued', 'waiting_retry')
        or (
          status = 'running'
-         and locked_at is not null
-         and locked_at < clock_timestamp() - make_interval(secs => v_lease_seconds)
+         and (
+           locked_at is null
+           or locked_at < clock_timestamp() - make_interval(secs => v_lease_seconds)
+         )
        )
      )
   returning id into v_claimed;
