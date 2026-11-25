@@ -1,4 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  classifyProviderFailure,
+  cooldownUntil,
+  selectEligibleProviders,
+  type ProviderHealth,
+} from "../_shared/provider-registry.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 // Prefer the modern secret key; omit Authorization because secret keys belong in apikey only.
@@ -22,14 +28,6 @@ const admin = createClient(SUPABASE_URL, ADMIN_KEY, {
 type QueueMessage = {
   msg_id: number | string;
   message: { job_id?: string; user_id?: string };
-};
-
-type ProviderFailure = {
-  provider: string;
-  message: string;
-  status: number | null;
-  retryable: boolean;
-  quota: boolean;
 };
 
 function response(body: unknown, status = 200) {
@@ -125,20 +123,6 @@ async function callOpenRouterFree(apiKey: string, prompt: string): Promise<strin
   }
 }
 
-function classifyFailure(provider: string, error: unknown): ProviderFailure {
-  const status = typeof error === "object" && error !== null && "status" in error
-    ? Number((error as { status: unknown }).status)
-    : null;
-  const message = error instanceof Error ? error.message : "Provider request failed";
-  const quota = status === 429 || /quota|resource exhausted|rate.?limit/i.test(message);
-  return {
-    provider,
-    message: message.slice(0, 500),
-    status,
-    retryable: quota || status === null || status >= 500,
-    quota,
-  };
-}
 
 const PIPELINE_STAGES = [
   ["brief", 1, null],
@@ -212,43 +196,53 @@ async function processJob(message: QueueMessage) {
   const credentialMap = new Map<string, string>(
     (credentialRows ?? []).map((row: { provider: string; api_key: string }) => [row.provider, row.api_key]),
   );
-  const prompt = buildPrompt(String(job.input?.topic ?? ""), String(job.input?.language ?? "Tamil"));
-  const providers: { name: string; providerKey: string; run: () => Promise<string> }[] = [];
-  const geminiKey = credentialMap.get("gemini");
-  const openRouterKey = credentialMap.get("openrouter");
-  if (geminiKey) providers.push({ name: "gemini_free_tier", providerKey: "gemini", run: () => callGemini(geminiKey, prompt) });
-  if (openRouterKey) providers.push({ name: "openrouter_free_router", providerKey: "openrouter", run: () => callOpenRouterFree(openRouterKey, prompt) });
-
-  if (providers.length === 0) {
-    const { error: pauseError } = await admin.from("jobs").update({
-      status: "paused",
-      current_stage: "script_storyboard",
-      error_code: "provider_not_configured",
-      error_message: "Add a Gemini or OpenRouter API key in RJ Settings. Both are configured for free-tier story generation; limits still apply.",
-      updated_at: new Date().toISOString(),
-    }).eq("id", jobId).eq("user_id", userId);
-    if (pauseError) throw pauseError;
-    await markPipelineBlocked(jobId, "script_storyboard", "Connect a text-generation provider to create the story.");
-    const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
-    if (archiveError) throw archiveError;
-    return { job_id: jobId, outcome: "paused_provider_not_configured" };
-  }
-
+  const { data: policyRow, error: policyError } = await admin.from("provider_user_policies")
+    .select("allow_paid_providers,monthly_budget_usd")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (policyError) throw policyError;
+  const policy = {
+    allowPaidProviders: policyRow?.allow_paid_providers === true,
+    monthlyBudgetUsd: Number(policyRow?.monthly_budget_usd ?? 0),
+  };
   const { data: healthRows, error: healthError } = await admin.from("provider_health")
     .select("provider_key,state,cooldown_until")
     .eq("user_id", userId)
     .eq("capability", "text");
   if (healthError) throw healthError;
-  const healthByProvider = new Map<string, { state: string; cooldown_until: string | null }>(
-    (healthRows ?? []).map((row: { provider_key: string; state: string; cooldown_until: string | null }) => [row.provider_key, row]),
-  );
-  const nowMs = Date.now();
-  const availableProviders = providers.filter((provider) => {
-    const health = healthByProvider.get(provider.providerKey);
-    return !health || health.state !== "cooldown" || !health.cooldown_until || new Date(health.cooldown_until).getTime() <= nowMs;
-  });
+  const eligible = selectEligibleProviders("text", credentialMap, (healthRows ?? []) as ProviderHealth[], policy);
+  const prompt = buildPrompt(String(job.input?.topic ?? ""), String(job.input?.language ?? "Tamil"));
+  const providers = eligible.map((spec) => ({
+    ...spec,
+    run: () => spec.key === "gemini"
+      ? callGemini(credentialMap.get("gemini")!, prompt)
+      : callOpenRouterFree(credentialMap.get("openrouter")!, prompt),
+  }));
+
+  if (providers.length === 0) {
+    const hasKeys = credentialMap.size > 0;
+    const paidConsentNeeded = hasKeys && !policy.allowPaidProviders && !credentialMap.has("openrouter");
+    const pauseCode = paidConsentNeeded ? "paid_provider_consent_required" : "provider_not_configured";
+    const pauseMessage = paidConsentNeeded
+      ? "Only account-billed providers are connected. RJ will not use them until you explicitly enable paid providers and set a monthly budget in Settings."
+      : "Connect a compatible free text provider in RJ Settings. Paid providers remain disabled by default.";
+    const { error: pauseError } = await admin.from("jobs").update({
+      status: "paused",
+      current_stage: "script_storyboard",
+      error_code: pauseCode,
+      error_message: pauseMessage,
+      updated_at: new Date().toISOString(),
+    }).eq("id", jobId).eq("user_id", userId);
+    if (pauseError) throw pauseError;
+    await markPipelineBlocked(jobId, "script_storyboard", pauseMessage);
+    const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
+    if (archiveError) throw archiveError;
+    return { job_id: jobId, outcome: paidConsentNeeded ? "paused_paid_consent_required" : "paused_provider_not_configured" };
+  }
+
+  const availableProviders = providers;
   if (providers.length > 0 && availableProviders.length === 0) {
-    const retryAt = providers.map((provider) => healthByProvider.get(provider.providerKey)?.cooldown_until)
+    const retryAt = providers.map((provider) => healthByProvider.get(provider.key)?.cooldown_until)
       .filter((value): value is string => !!value)
       .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
     const delaySeconds = retryAt ? Math.max(60, Math.ceil((new Date(retryAt).getTime() - Date.now()) / 1000)) : 300;
@@ -271,11 +265,11 @@ async function processJob(message: QueueMessage) {
     return { job_id: jobId, outcome: "waiting_for_provider_cooldown", delay_seconds: delaySeconds };
   }
 
-  const failures: ProviderFailure[] = [];
+  const failures: ReturnType<typeof classifyProviderFailure>[] = [];
   for (const provider of availableProviders) {
     const stageStartedAt = new Date().toISOString();
     const { error: stageStartError } = await admin.from("job_stages").update({
-      status: "running", selected_provider: provider.name, started_at: stageStartedAt,
+      status: "running", selected_provider: provider.label, started_at: stageStartedAt,
       error_code: null, error_message: null, updated_at: stageStartedAt,
     }).eq("job_id", jobId).eq("stage_key", "script_storyboard");
     if (stageStartError) throw stageStartError;
@@ -292,19 +286,19 @@ async function processJob(message: QueueMessage) {
     } catch (error) {
       const failure = classifyFailure(provider.name, error);
       failures.push(failure);
-      const cooldownMinutes = failure.quota ? 30 : failure.retryable ? 5 : null;
+      const cooldown = cooldownUntil(failure, failures.length);
       const { error: healthUpdateError } = await admin.from("provider_health").upsert({
         user_id: userId, provider_key: provider.providerKey, capability: "text",
-        state: cooldownMinutes ? "cooldown" : "needs_attention",
-        cooldown_until: cooldownMinutes ? new Date(Date.now() + cooldownMinutes * 60000).toISOString() : null,
+        state: cooldown ? "cooldown" : "needs_attention",
+        cooldown_until: cooldown,
         last_http_status: failure.status,
-        last_error_code: failure.quota ? "quota_exhausted" : failure.status === null ? "network_error" : "http_" + failure.status,
+        last_error_code: failure.code,
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id,provider_key,capability" });
       if (healthUpdateError) throw healthUpdateError;
       const { error: failureUpdateError } = await admin.from("job_attempts").update({
         status: failure.quota ? "quota_exhausted" : failure.status === 429 ? "rate_limited" : "failed",
-        error_code: failure.status === null ? "network_error" : "http_" + failure.status,
+        error_code: failure.code,
         safe_error_message: failure.message,
         finished_at: new Date().toISOString(),
       }).eq("id", attempt.id);
@@ -390,7 +384,7 @@ async function processJob(message: QueueMessage) {
   const { error: failedUpdateError } = await admin.from("jobs").update({
     status: "failed",
     error_code: "all_providers_failed",
-    error_message: failures.map((failure) => failure.provider + ": " + failure.message).join(" | ").slice(0, 1000),
+    error_message: failures.map((failure) => failure.code + ": " + failure.message).join(" | ").slice(0, 1000),
     attempt_count: Number(job.attempt_count ?? 0) + failures.length,
     updated_at: new Date().toISOString(),
   }).eq("id", jobId).eq("user_id", userId);
@@ -403,7 +397,7 @@ async function processJob(message: QueueMessage) {
   if (stageFailedError) throw stageFailedError;
   const { error: archiveError } = await admin.rpc("rj_archive_job", { p_msg_id: Number(message.msg_id) });
   if (archiveError) throw archiveError;
-  return { job_id: jobId, outcome: "failed", providers_tried: failures.map((failure) => failure.provider) };
+  return { job_id: jobId, outcome: "failed", providers_tried: failures.map((failure) => failure.code) };
 }
 
 Deno.serve(async (req: Request) => {
