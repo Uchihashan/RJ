@@ -4,19 +4,23 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../lib/supabase";
 
 type Message = { role: "user" | "assistant"; content: string };
+type Pending = { title: string; detail: string; run: () => Promise<void> };
+type Props = { onCreateVideoProject: (topic: string) => Promise<void>; onCreateReminder: (title: string, time: string) => Promise<void>; onNavigate: (tab: string) => void };
 const RED = "#F3263D";
 const WELCOME: Message = {
   role: "assistant",
   content: "வணக்கம்! நான் RJ. தமிழ், Tanglish அல்லது English-ல் பேசலாம். என்ன வேலை செய்ய வேண்டும்?",
 };
 
-export default function AssistantScreen() {
+export default function AssistantScreen({ onCreateVideoProject, onCreateReminder, onNavigate }: Props) {
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [storageKey, setStorageKey] = useState("rj_chat_history_guest");
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
   const canSend = useMemo(() => !!draft.trim() && !busy, [draft, busy]);
 
   useEffect(() => {
@@ -77,9 +81,13 @@ export default function AssistantScreen() {
       return;
     }
     const next = [...messages, { role: "user" as const, content }];
-    setMessages(next);
-    setDraft("");
-    setError("");
+    setMessages(next); setDraft(""); setError("");
+    const video = content.match(/^(?:create|make) video\s*[:\-]\s*(.+)$/i);
+    const reminder = content.match(/^remind me to (.+) at ((?:[01]?\d|2[0-3]):[0-5]\d)$/i);
+    const nav = content.match(/^(?:open|go to) (create|edit|tools|schedule|settings|home)$/i);
+    if (video) { setPending({ title: "Create video project", detail: video[1], run: () => onCreateVideoProject(video[1].trim()) }); setMessages(v => [...v, { role: "assistant", content: "இந்த video project-ஐ queue-ல் சேர்க்கலாமா? Confirm அழுத்தினால் மட்டும் சேர்க்கப்படும்." }]); return; }
+    if (reminder) { setPending({ title: "Save reminder", detail: reminder[1] + " at " + reminder[2], run: () => onCreateReminder(reminder[1].trim(), reminder[2]) }); setMessages(v => [...v, { role: "assistant", content: "இந்த reminder-ஐ சேமிக்கலாமா? Confirm அழுத்தினால் மட்டும் சேமிக்கப்படும்." }]); return; }
+    if (nav) { const tab = nav[1][0].toUpperCase() + nav[1].slice(1).toLowerCase(); setPending({ title: "Open " + tab, detail: "RJ " + tab + " screen", run: async () => onNavigate(tab) }); setMessages(v => [...v, { role: "assistant", content: tab + " screen-ஐ திறக்கலாமா?" }]); return; }
     setBusy(true);
     try {
       const { data, error: invokeError } = await supabase.functions.invoke("rj-assistant", {
@@ -93,6 +101,14 @@ export default function AssistantScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const confirmPending = async () => {
+    if (!pending || actionBusy) return;
+    setActionBusy(true);
+    try { await pending.run(); setMessages(v => [...v, { role: "assistant", content: "செயல் முடிந்தது." }]); setPending(null); }
+    catch (e: any) { setError(e?.message ?? "RJ action failed."); }
+    finally { setActionBusy(false); }
   };
 
   return (
@@ -117,6 +133,14 @@ export default function AssistantScreen() {
           </View>
         ))}
         {busy ? <View style={styles.loading}><ActivityIndicator color={RED} /><Text style={styles.sub}>RJ is thinking…</Text></View> : null}
+        {pending ? <View style={styles.actionCard}>
+          <Text style={styles.actionHeading}>{pending.title.toUpperCase()}</Text>
+          <Text style={styles.actionDetail}>{pending.detail}</Text>
+          <View style={styles.actionButtons}>
+            <Pressable accessibilityRole="button" disabled={actionBusy} onPress={confirmPending} style={styles.confirmButton}><Text style={styles.confirmText}>{actionBusy ? "WORKING..." : "CONFIRM"}</Text></Pressable>
+            <Pressable accessibilityRole="button" disabled={actionBusy} onPress={() => setPending(null)} style={styles.cancelButton}><Text style={styles.cancelText}>CANCEL</Text></Pressable>
+          </View>
+        </View> : null}
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       </ScrollView>
       <View style={styles.composer}>
@@ -155,6 +179,14 @@ const styles = StyleSheet.create({
   role: { color: RED, fontSize: 9, fontWeight: "900", letterSpacing: 1, marginBottom: 5 },
   message: { color: "#F0F0F0", fontSize: 14, lineHeight: 21 },
   loading: { flexDirection: "row", alignItems: "center", gap: 9, padding: 8 },
+  actionCard: { backgroundColor: "#261217", borderWidth: 1, borderColor: RED, borderRadius: 12, padding: 12, marginBottom: 10 },
+  actionHeading: { color: RED, fontSize: 9, fontWeight: "900", letterSpacing: 1 },
+  actionDetail: { color: "#FFF", fontSize: 13, lineHeight: 19, marginTop: 7 },
+  actionButtons: { flexDirection: "row", gap: 8, marginTop: 10 },
+  confirmButton: { flex: 1, minHeight: 40, backgroundColor: RED, borderRadius: 9, justifyContent: "center", alignItems: "center" },
+  confirmText: { color: "#FFF", fontSize: 11, fontWeight: "900" },
+  cancelButton: { flex: 1, minHeight: 40, borderWidth: 1, borderColor: "#777", borderRadius: 9, justifyContent: "center", alignItems: "center" },
+  cancelText: { color: "#DDD", fontSize: 11, fontWeight: "900" },
   error: { color: "#FF9B9B", fontSize: 12, lineHeight: 18, marginTop: 8 },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, marginTop: 10 },
   input: { flex: 1, minHeight: 48, maxHeight: 110, color: "#FFF", backgroundColor: "#151515", borderWidth: 1, borderColor: "#393939", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14 },
