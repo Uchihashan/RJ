@@ -186,7 +186,7 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, minHeight: 560 },
+  wrap: { flex: 1, minHeight: 0 },
   hero: { paddingVertical: 12, paddingHorizontal: 4 },
   heroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   heroCopy: { flex: 1 },
@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
   sub: { color: "#A3A3A3", fontSize: 12, lineHeight: 18, marginTop: 6 },
   clearButton: { minHeight: 40, paddingHorizontal: 10, justifyContent: "center", borderWidth: 1, borderColor: "#454545", borderRadius: 9 },
   clearText: { color: "#DDD", fontSize: 9, fontWeight: "900" },
-  chat: { flex: 1, maxHeight: 430, backgroundColor: "#101010", borderRadius: 15, borderWidth: 1, borderColor: "#292929", padding: 10 },
+  chat: { flex: 1, minHeight: 0, backgroundColor: "#101010", borderRadius: 15, borderWidth: 1, borderColor: "#292929", padding: 10 },
   bubble: { padding: 12, borderRadius: 13, marginBottom: 10, maxWidth: "94%" },
   userBubble: { alignSelf: "flex-end", backgroundColor: "#40121A", borderWidth: 1, borderColor: "#70202D" },
   assistantBubble: { alignSelf: "flex-start", backgroundColor: "#202020", borderWidth: 1, borderColor: "#343434" },
