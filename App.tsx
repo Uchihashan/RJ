@@ -172,6 +172,23 @@ export default function App() {
     };
   }, []);
 
+
+  useEffect(() => {
+    if (!session || !supabase) {
+      setYoutubeConnection("unknown");
+      setYoutubeChannelTitle(null);
+      return;
+    }
+    let active = true;
+    supabase.functions.invoke("rj-youtube-oauth", { body: { action: "status" } }).then(({ data, error }) => {
+      if (!active) return;
+      if (error) { setYoutubeConnection("unknown"); return; }
+      setYoutubeConnection(data?.connected ? "connected" : "unknown");
+      setYoutubeChannelTitle(typeof data?.channel_title === "string" ? data.channel_title : null);
+    }).catch(() => { if (active) setYoutubeConnection("unknown"); });
+    return () => { active = false; };
+  }, [session]);
+
   useEffect(() => {
     if (!authReady || !dataLoaded) return;
     if (!session || !supabase) {
