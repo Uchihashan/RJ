@@ -7,7 +7,7 @@ export type StoryTopicValidation = {
 const SUBJECT_ANCHORS: Array<{ label: string; topic: RegExp; story: RegExp }> = [
   { label: "rabbit / முயல்", topic: /முயல|rabbit/i, story: /முயல|rabbit/i },
   { label: "lion / சிங்கம்", topic: /சிங்க|lion/i, story: /சிங்க|lion/i },
-  { label: "elephant / யானை", topic: /யான|elephant/i, story: /யான|elephant/i },
+  { label: "elephant / யானை", topic: /யானை|elephant/i, story: /யானை|elephant/i },
   { label: "butterfly / வண்ணத்துப்பூச்சி", topic: /வண்ணத்துப்பூச்ச|butterfl/i, story: /வண்ணத்துப்பூச்ச|butterfl/i },
   { label: "turtle / ஆமை", topic: /ஆமை|turtle/i, story: /ஆமை|turtle/i },
   { label: "dog / நாய்", topic: /நாய|நாய்|dog/i, story: /நாய|நாய்|dog/i },
