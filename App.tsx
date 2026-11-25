@@ -287,8 +287,9 @@ export default function App() {
     AsyncStorage.multiSet(writes).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
   }, [jobs, reminders, dataLoaded, authReady, session, jobsOwnerId]);
 
-  const createJob = async () => {
-    const clean = topic.trim();
+  const createJob = async (requestedTopic?: string, requestedLanguage?: string) => {
+    const clean = (requestedTopic ?? topic).trim();
+    const projectLanguage = requestedLanguage ?? language;
     if (!clean) {
       Alert.alert("Topic needed", "Enter a video heading or story topic first.");
       return;
@@ -300,7 +301,7 @@ export default function App() {
     const item: Job = {
       id: String(Date.now()),
       topic: clean,
-      language,
+      language: projectLanguage,
       createdAt: new Date().toLocaleString(),
       status: "Queued — RJ worker will check providers"
     };
@@ -309,7 +310,7 @@ export default function App() {
         user_id: session.user.id,
         job_type: "video_generation",
         status: "queued",
-        input: { topic: clean, language, stage: "queued" }
+        input: { topic: clean, language: projectLanguage, stage: "queued" }
       }).select("id").single();
       if (data?.id) item.id = data.id;
       if (error) {
@@ -463,8 +464,9 @@ export default function App() {
     }
   };
 
-  const addReminder = async () => {
-    const title = scheduleTitle.trim();
+  const addReminder = async (requestedTitle?: string, requestedTime?: string) => {
+    const title = (requestedTitle ?? scheduleTitle).trim();
+    const reminderTime = requestedTime ?? scheduleTime;
     if (!title) {
       Alert.alert("Reminder needed", "Enter what you want RJ to remind you about.");
       return;
@@ -484,7 +486,7 @@ export default function App() {
         const current = await Notifications.getPermissionsAsync();
         const permission = current.status === "granted" ? current : await Notifications.requestPermissionsAsync();
         if (permission.status === "granted") {
-          const [hour, minute] = scheduleTime.split(":").map(Number);
+          const [hour, minute] = reminderTime.split(":").map(Number);
           const date = new Date();
           date.setHours(hour, minute, 0, 0);
           if (date.getTime() <= Date.now()) date.setDate(date.getDate() + 1);
@@ -497,7 +499,7 @@ export default function App() {
         Alert.alert("Notification unavailable", "The reminder will still be saved inside RJ, but Android notification scheduling failed.");
       }
     }
-    const item: Reminder = { id: String(Date.now()), title, time: scheduleTime, notificationId };
+    const item: Reminder = { id: String(Date.now()), title, time: reminderTime, notificationId };
     setReminders(current => [item, ...current]);
     setScheduleTitle("");
     Alert.alert("Reminder saved", notificationId ? "RJ will notify you at the selected time." : "Saved in RJ. Allow notifications in Android settings to receive an alert.");
@@ -575,7 +577,7 @@ export default function App() {
         <Text style={styles.heroSub}>உங்கள் அடுத்த வேலையைச் சொல்லுங்கள்.</Text>
         <Text style={styles.heroSub}>Tell RJ what you want to get done today.</Text>
       </View>
-      <AssistantScreen />
+      <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={(value) => setTab(value as Tab)} />
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.quickRow}>
