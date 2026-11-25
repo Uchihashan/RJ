@@ -23,6 +23,8 @@ import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
 type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
 type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean };
+type PipelineStage = { job_id: string; stage_key: string; stage_order: number; status: string; selected_provider?: string | null; error_message?: string | null };
+const PIPELINE_STAGE_LABELS: Record<string, string> = { brief: "Brief", script_storyboard: "Story & script", scene_assets: "Visual scenes", voice_audio: "Voice-over", captions: "Captions", timeline_edit: "Timeline edit", render_export: "Render video", quality_check: "Quality check", metadata_thumbnail: "Title & thumbnail", youtube_upload: "YouTube upload", youtube_schedule_verify: "Schedule verification" };
 
 function jobStatusLabel(row: any): string {
   if (row.status === "blocked") return row.current_stage === "scene_assets" ? "Story saved — waiting for image/video provider" : "Blocked — connect the required provider";
@@ -99,6 +101,7 @@ export default function App() {
   const [topic, setTopic] = useState("");
   const [language, setLanguage] = useState("Tamil");
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobStages, setJobStages] = useState<Record<string, PipelineStage[]>>({});
   const [jobsOwnerId, setJobsOwnerId] = useState<string | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [chat, setChat] = useState("");
@@ -156,11 +159,13 @@ export default function App() {
     if (!authReady || !dataLoaded) return;
     if (!session || !supabase) {
       setJobs([]);
+      setJobStages({});
       setJobsOwnerId(null);
       return;
     }
     let active = true;
     setJobs([]);
+    setJobStages({});
     setJobsOwnerId(null);
     const userJobsKey = "rj_video_jobs_" + session.user.id;
     let localJobsFallback: Job[] = [];
@@ -195,6 +200,15 @@ export default function App() {
       if (active) {
         setJobs(merged);
         setJobsOwnerId(session.user.id);
+      }
+      const { data: stages } = await supabase.from("job_stages")
+        .select("job_id,stage_key,stage_order,status,selected_provider,error_message")
+        .eq("user_id", session.user.id)
+        .order("stage_order", { ascending: true });
+      if (active && stages) {
+        const grouped: Record<string, PipelineStage[]> = {};
+        for (const stage of stages as PipelineStage[]) (grouped[stage.job_id] ??= []).push(stage);
+        setJobStages(grouped);
       }
     })().catch(() => {
       if (active) {
@@ -243,6 +257,15 @@ export default function App() {
       }));
       setJobs(remoteJobs);
       setJobsOwnerId(session.user.id);
+      const { data: stages } = await client.from("job_stages")
+        .select("job_id,stage_key,stage_order,status,selected_provider,error_message")
+        .eq("user_id", session.user.id)
+        .order("stage_order", { ascending: true });
+      if (active && stages) {
+        const grouped: Record<string, PipelineStage[]> = {};
+        for (const stage of stages as PipelineStage[]) (grouped[stage.job_id] ??= []).push(stage);
+        setJobStages(grouped);
+      }
     };
     const interval = setInterval(refreshJobs, 20000);
     return () => { active = false; clearInterval(interval); };
@@ -617,6 +640,16 @@ export default function App() {
           <Text style={styles.jobTitle}>{job.topic}</Text>
           <Text style={styles.muted}>{job.language} • {job.createdAt}</Text>
           <Text style={styles.jobStatus}>{job.status}</Text>
+          {jobStages[job.id]?.length ? (
+            <View style={{ marginTop: 10, paddingTop: 9, borderTopWidth: 1, borderTopColor: "#383838" }}>
+              <Text style={styles.muted}>Pipeline: {jobStages[job.id].filter(stage => stage.status === "succeeded").length}/11 stages complete</Text>
+              {jobStages[job.id].filter(stage => ["running", "blocked", "failed", "waiting_retry"].includes(stage.status)).map(stage => (
+                <Text key={stage.stage_key} style={[styles.muted, { color: stage.status === "blocked" || stage.status === "failed" ? "#F0A23A" : "#E2E2E2", marginTop: 4 }]}>
+                  {PIPELINE_STAGE_LABELS[stage.stage_key] ?? stage.stage_key}: {stage.status === "blocked" ? "Waiting for required provider" : stage.status === "failed" ? "Needs attention" : stage.status === "waiting_retry" ? "Retry scheduled" : "In progress"}
+                </Text>
+              ))}
+            </View>
+          ) : null}
           {job.story ? (
             <>
               <Text style={styles.muted}>{expandedJobId === job.id ? job.story : job.story.slice(0, 420) + (job.story.length > 420 ? "…" : "")}</Text>
