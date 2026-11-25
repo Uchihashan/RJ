@@ -34,6 +34,7 @@ begin
      and stage_key = p_stage_key
      and (
        status in ('pending', 'queued', 'waiting_retry')
+       or (status = 'blocked' and error_code = 'capability_provider_missing')
        or (
          status = 'running'
          and (
