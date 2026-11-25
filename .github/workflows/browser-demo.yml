@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/rj-full-integration
+      - feature/rj-ai-brain-completion
   workflow_dispatch:
 
 permissions:
