@@ -58,8 +58,9 @@ jobs:
       group: rj-free-render-worker
       cancel-in-progress: false
     env:
-      SUPABASE_URL: ${{ secrets.RJ_SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.RJ_SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_URL: "https://vxtklbtenozsluhseigp.supabase.co"
+      SUPABASE_SECRET_KEY: ${{ secrets.RJ_SUPABASE_SERVER_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.RJ_SUPABASE_SERVER_KEY }}
       RJ_ONESHOT: "true"
       RJ_RENDER_BATCH_SIZE: "5"
     steps:
@@ -69,8 +70,8 @@ jobs:
           ref: feature/rj-ai-brain-completion
       - name: Verify required secrets
         run: |
-          test -n "$SUPABASE_URL" || (echo "Missing RJ_SUPABASE_URL repository secret" && exit 1)
-          test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "Missing RJ_SUPABASE_SERVICE_ROLE_KEY repository secret" && exit 1)
+          test -n "$SUPABASE_URL" || (echo "Missing Supabase URL" && exit 1)
+          test -n "$SUPABASE_SECRET_KEY" || (echo "Missing RJ_SUPABASE_SERVER_KEY repository secret" && exit 1)
       - name: Install Node
         uses: actions/setup-node@v4
         with:
