@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   build-web-demo:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -48,3 +49,46 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 3
+
+  render-free-worker:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: rj-free-render-worker
+      cancel-in-progress: false
+    env:
+      SUPABASE_URL: ${{ secrets.RJ_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.RJ_SUPABASE_SERVICE_ROLE_KEY }}
+      RJ_ONESHOT: "true"
+      RJ_RENDER_BATCH_SIZE: "5"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: feature/rj-ai-brain-completion
+      - name: Verify required secrets
+        run: |
+          test -n "$SUPABASE_URL" || (echo "Missing RJ_SUPABASE_URL repository secret" && exit 1)
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "Missing RJ_SUPABASE_SERVICE_ROLE_KEY repository secret" && exit 1)
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install free local media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fontconfig ca-certificates python3 python3-venv curl espeak-ng libespeak-ng1
+          sudo python3 -m venv /opt/piper-venv
+          sudo /opt/piper-venv/bin/pip install --no-cache-dir piper-tts
+          sudo mkdir -p /opt/piper-models
+          sudo curl -fsSL "https://huggingface.co/tinisoft/piper-ta_IN-rasa_female-medium/resolve/main/ta_IN-rasa_female-medium.onnx" -o /opt/piper-models/rasa.onnx
+          sudo curl -fsSL "https://huggingface.co/tinisoft/piper-ta_IN-rasa_female-medium/resolve/main/ta_IN-rasa_female-medium.onnx.json" -o /opt/piper-models/rasa.onnx.json
+          sudo curl -fsSL "https://huggingface.co/Jeyaram-K/piper-tamil-voices/resolve/main/ta_IN-HemaLatha-medium/ta_IN-HemaLatha-medium.onnx" -o /opt/piper-models/hemalatha.onnx
+          sudo curl -fsSL "https://huggingface.co/Jeyaram-K/piper-tamil-voices/resolve/main/ta_IN-HemaLatha-medium/ta_IN-HemaLatha-medium.onnx.json" -o /opt/piper-models/hemalatha.onnx.json
+      - name: Install and build renderer
+        working-directory: workers/rj-renderer
+        run: npm install --no-audit --no-fund && npm run build
+      - name: Process queued RJ render jobs once
+        working-directory: workers/rj-renderer
+        run: npm start
