@@ -130,6 +130,7 @@ export default function App() {
   const [youtubeConnection, setYoutubeConnection] = useState<"unknown" | "connected" | "denied" | "error">("unknown");
   const [youtubeChannelTitle, setYoutubeChannelTitle] = useState<string | null>(null);
   const [youtubeBusy, setYoutubeBusy] = useState(false);
+  const [youtubeUploadingJobId, setYoutubeUploadingJobId] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -421,10 +422,15 @@ export default function App() {
         { text: "Approve & upload privately", onPress: async () => {
           try {
             await beginAgentAction("youtube.upload", { job_id: job.id });
-            Alert.alert("Upload queued", "RJ received your approval. The background worker will upload this video privately.");
+            setYoutubeUploadingJobId(job.id);
+            const { data, error } = await supabase!.functions.invoke("rj-youtube-publish", { body: { job_id: job.id } });
+            if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? "YouTube upload failed.");
+            setJobs(current => current.map(item => item.id === job.id ? { ...item, youtubeVideoId: String(data.video_id) } : item));
+            Alert.alert("YouTube upload complete", "Video uploaded as PRIVATE. Open YouTube Studio to review it before making it public.");
+
           } catch (error: any) {
-            Alert.alert("Upload not started", error?.message ?? "Enable YouTube upload permission and connect a channel first.");
-          }
+            Alert.alert("Upload not completed", error?.message ?? "Enable YouTube upload permission and connect a channel first.");
+          } finally { setYoutubeUploadingJobId(null); }
         } }
       ]
     );
@@ -792,7 +798,7 @@ export default function App() {
                   <Text style={{ color: "#53C98B", marginTop: 8, fontWeight: "700" }}>Uploaded privately — open YouTube video</Text>
                 </Pressable>
               ) : session ? (
-                <ActionButton title="Approve & upload privately to YouTube" onPress={() => approveYoutubeUpload(job)} secondary />
+                <ActionButton title={youtubeUploadingJobId === job.id ? "Uploading to YouTube…" : "Approve & upload privately to YouTube"} onPress={() => approveYoutubeUpload(job)} secondary disabled={youtubeUploadingJobId !== null} />
               ) : null}
               <Pressable onPress={async () => {
                 if (!supabase) return;
