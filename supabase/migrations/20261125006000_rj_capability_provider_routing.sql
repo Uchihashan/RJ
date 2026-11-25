@@ -24,6 +24,7 @@ create policy "Users can update their own provider policy"
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
 grant select, insert, update on public.provider_user_policies to authenticated;
+grant select, insert, update, delete on public.provider_user_policies to service_role;
 
 create table if not exists public.provider_capability_catalog (
   provider_key text not null,
