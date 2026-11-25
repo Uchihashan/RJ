@@ -170,7 +170,7 @@ export default function App() {
       localJobsFallback = localJobs;
       if (active) setJobs(localJobs);
       const { data, error } = await supabase.from("jobs")
-        .select("id,input,status,created_at,output,error_code")
+        .select("id,input,status,created_at,output,error_code,current_stage")
         .eq("user_id", session.user.id)
         .eq("job_type", "video_generation")
         .order("created_at", { ascending: false });
@@ -225,7 +225,7 @@ export default function App() {
     let active = true;
     const refreshJobs = async () => {
       const { data, error } = await client.from("jobs")
-        .select("id,input,status,created_at,output,error_code")
+        .select("id,input,status,created_at,output,error_code,current_stage")
         .eq("user_id", session.user.id)
         .eq("job_type", "video_generation")
         .order("created_at", { ascending: false });
