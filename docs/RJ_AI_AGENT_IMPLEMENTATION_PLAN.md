@@ -217,3 +217,22 @@ Verification boundary:
 - The previous provider-routing commit passed the full browser workflow, including TypeScript, Expo config, Expo Doctor, Deno checks/provider tests, browser export, and artifact upload.
 - This new lease migration and worker integration require a fresh CI run; do not claim they are verified until that run succeeds.
 - Database migration remains branch-only and has not been applied to hosted Supabase.
+
+## Tamil speech adapter update — 2026-11-25
+
+Implemented on `feature/rj-full-integration` (adapter source only; not deployed or enabled):
+
+- Added a Google Gemini 3.8 Flash TTS REST adapter using the documented Interactions API response shape and WAV output.
+- Adapter validates input length, applies a bounded request timeout, decodes the audio response, and verifies the WAV container header before returning bytes.
+- Added parser tests for the Interactions API audio block and missing-audio responses.
+- Added `gemini_tts` to the capability registry and catalog as `account_dependent` / `disabled_by_policy`.
+- Added a routing test proving that even a positive paid budget cannot select Gemini TTS while the adapter remains disabled.
+
+Provider research:
+- Google's current speech-generation guide lists Tamil among supported languages for Gemini 3.8 Flash TTS and documents the Interactions API request/response format: https://ai.google.dev/gemini-api/docs/speech-generation
+- The Gemini API pricing page lists a free tier and a separate paid tier. A key alone does not prove which tier the project uses, and the free-tier usage may be used to improve Google's products: https://ai.google.dev/gemini-api/docs/pricing
+- Therefore the adapter is deliberately not connected to the live job runner. RJ must not make a TTS call until account-tier verification and reliable hard spend enforcement exist. No provider call or charge was made during implementation.
+
+Verification:
+- A fresh CI run is in progress for the TTS adapter and tests. Confirm the latest run before describing this batch as passing.
+- No hosted Supabase migration/function deployment, Render deployment, APK build, or `main` merge was performed.
