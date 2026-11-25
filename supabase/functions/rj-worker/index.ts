@@ -221,7 +221,7 @@ async function processJob(message: QueueMessage) {
 
   if (providers.length === 0) {
     const { error: pauseError } = await admin.from("jobs").update({
-      status: "blocked",
+      status: "paused",
       current_stage: "script_storyboard",
       error_code: "provider_not_configured",
       error_message: "Add a Gemini or OpenRouter API key in RJ Settings. Both are configured for free-tier story generation; limits still apply.",
