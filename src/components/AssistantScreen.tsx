@@ -4,15 +4,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../lib/supabase";
 
 type Message = { role: "user" | "assistant"; content: string };
-type Pending = { title: string; detail: string; run: () => Promise<string> };
-type Props = { onCreateVideoProject: (topic: string) => Promise<string>; onCreateReminder: (title: string, time: string) => Promise<string>; onNavigate: (tab: string) => Promise<string> };
+type Pending = { title: string; detail: string; tool: ToolKey; arguments: Record<string, string>; run: () => Promise<string> };
+type ToolKey = "video.create" | "reminder.create" | "navigation.open";
+type Props = { onCreateVideoProject: (topic: string) => Promise<string>; onCreateReminder: (title: string, time: string) => Promise<string>; onNavigate: (tab: string) => Promise<string>; onBeginAgentAction: (tool: ToolKey, args: Record<string, string>) => Promise<string>; onFinishAgentAction: (requestId: string, status: "succeeded" | "failed", summary: string) => Promise<void> };
 const RED = "#F3263D";
 const WELCOME: Message = {
   role: "assistant",
   content: "வணக்கம்! நான் RJ. தமிழ், Tanglish அல்லது English-ல் பேசலாம். என்ன வேலை செய்ய வேண்டும்?",
 };
 
-export default function AssistantScreen({ onCreateVideoProject, onCreateReminder, onNavigate }: Props) {
+export default function AssistantScreen({ onCreateVideoProject, onCreateReminder, onNavigate, onBeginAgentAction, onFinishAgentAction }: Props) {
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -86,9 +87,9 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
       ?? content.match(/^(?:create|make)\s+(?:a\s+)?video\s+(.+)$/i);
     const reminder = content.match(/^(?:remind me to|remind me|nyabagam paduthu|நினைவூட்டு)\s+(.+?)\s+(?:at|க்கு)\s*((?:[01]?\d|2[0-3]):[0-5]\d)$/i);
     const nav = content.match(/^(?:open|go to|திற|thira|thirakka)\s+(create|edit|tools|schedule|settings|home|உருவாக்கு|திருத்து|கருவிகள்|அட்டவணை|அமைப்புகள்|முகப்பு)$/i);
-    if (video) { setPending({ title: "Create video project", detail: video[1], run: () => onCreateVideoProject(video[1].trim()) }); setMessages(v => [...v, { role: "assistant", content: "இந்த video project-ஐ queue-ல் சேர்க்கலாமா? Confirm அழுத்தினால் மட்டும் சேர்க்கப்படும்." }]); return; }
-    if (reminder) { setPending({ title: "Save reminder", detail: reminder[1] + " at " + reminder[2], run: () => onCreateReminder(reminder[1].trim(), reminder[2]) }); setMessages(v => [...v, { role: "assistant", content: "இந்த reminder-ஐ சேமிக்கலாமா? Confirm அழுத்தினால் மட்டும் சேமிக்கப்படும்." }]); return; }
-    if (nav) { const aliases: Record<string, string> = { "உருவாக்கு": "Create", "திருத்து": "Edit", "கருவிகள்": "Tools", "அட்டவணை": "Schedule", "அமைப்புகள்": "Settings", "முகப்பு": "Home" }; const raw = nav[1].toLowerCase(); const tab = aliases[nav[1]] ?? raw[0].toUpperCase() + raw.slice(1); setPending({ title: "Open " + tab, detail: "RJ " + tab + " screen", run: () => onNavigate(tab) }); setMessages(v => [...v, { role: "assistant", content: tab + " screen-ஐ திறக்கலாமா?" }]); return; }
+    if (video) { setPending({ title: "Create video project", detail: video[1], tool: "video.create", arguments: { topic: video[1].trim() }, run: () => onCreateVideoProject(video[1].trim()) }); setMessages(v => [...v, { role: "assistant", content: "இந்த video project-ஐ queue-ல் சேர்க்கலாமா? Confirm அழுத்தினால் மட்டும் சேர்க்கப்படும்." }]); return; }
+    if (reminder) { setPending({ title: "Save reminder", detail: reminder[1] + " at " + reminder[2], tool: "reminder.create", arguments: { title: reminder[1].trim(), time: reminder[2] }, run: () => onCreateReminder(reminder[1].trim(), reminder[2]) }); setMessages(v => [...v, { role: "assistant", content: "இந்த reminder-ஐ சேமிக்கலாமா? Confirm அழுத்தினால் மட்டும் சேமிக்கப்படும்." }]); return; }
+    if (nav) { const aliases: Record<string, string> = { "உருவாக்கு": "Create", "திருத்து": "Edit", "கருவிகள்": "Tools", "அட்டவணை": "Schedule", "அமைப்புகள்": "Settings", "முகப்பு": "Home" }; const raw = nav[1].toLowerCase(); const tab = aliases[nav[1]] ?? raw[0].toUpperCase() + raw.slice(1); setPending({ title: "Open " + tab, detail: "RJ " + tab + " screen", tool: "navigation.open", arguments: { tab }, run: () => onNavigate(tab) }); setMessages(v => [...v, { role: "assistant", content: tab + " screen-ஐ திறக்கலாமா?" }]); return; }
     if (!supabase) {
       setError("RJ cloud connection is not configured in this build.");
       return;
@@ -111,9 +112,20 @@ export default function AssistantScreen({ onCreateVideoProject, onCreateReminder
   const confirmPending = async () => {
     if (!pending || actionBusy) return;
     setActionBusy(true);
-    try { const result = await pending.run(); setMessages(v => [...v, { role: "assistant", content: result }]); setPending(null); }
-    catch (e: any) { setError(e?.message ?? "RJ action failed."); }
-    finally { setActionBusy(false); }
+    let requestId = "";
+    try {
+      requestId = await onBeginAgentAction(pending.tool, pending.arguments);
+      const result = await pending.run();
+      await onFinishAgentAction(requestId, "succeeded", result);
+      setMessages(v => [...v, { role: "assistant", content: result }]);
+      setPending(null);
+    } catch (e: any) {
+      if (requestId) {
+        try { await onFinishAgentAction(requestId, "failed", e?.message ?? "Action failed"); }
+        catch { setError("RJ action failed and its audit record could not be updated. " + (e?.message ?? "")); }
+      }
+      setError(e?.message ?? "RJ action failed.");
+    } finally { setActionBusy(false); }
   };
 
   return (
