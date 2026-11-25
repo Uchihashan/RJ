@@ -101,14 +101,22 @@ Deno.serve(async (req: Request) => {
     }
     if (tool === "navigation.open" && !args.tab) return json({ error: "A valid RJ screen is required." }, 400);
 
+    const requestId = crypto.randomUUID();
     const { data: permission, error: permissionError } = await admin.from("agent_tool_permissions")
       .select("enabled,requires_confirmation")
       .eq("user_id", user.id).eq("tool_key", tool).maybeSingle();
     if (permissionError) return json({ error: "Could not verify RJ tool permission." }, 500);
-    if (!permission?.enabled) return json({ error: "Permission is disabled. Enable this tool in RJ Settings first." }, 403);
+    if (!permission?.enabled) {
+      const { error: deniedError } = await admin.from("agent_action_audit").insert({
+        user_id: user.id, request_id: requestId, tool_key: tool,
+        status: "denied", safe_arguments: args, result_summary: "Tool permission is disabled.",
+        finished_at: new Date().toISOString(),
+      });
+      if (deniedError) return json({ error: "Permission is disabled and the denial audit could not be saved." }, 500);
+      return json({ error: "Permission is disabled. Enable this tool in RJ Settings first." }, 403);
+    }
     if (permission.requires_confirmation && body.confirmed !== true) return json({ error: "This action requires confirmation." }, 403);
 
-    const requestId = crypto.randomUUID();
     const { error: auditError } = await admin.from("agent_action_audit").insert({
       user_id: user.id, request_id: requestId, tool_key: tool,
       status: "proposed", safe_arguments: args,
