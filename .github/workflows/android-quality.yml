@@ -64,6 +64,7 @@ jobs:
           deno check supabase/functions/rj-worker/index.ts
           deno check supabase/functions/rj-agent-actions/index.ts
           deno check supabase/functions/rj-youtube-oauth/index.ts
+          deno check supabase/functions/rj-youtube-publish/index.ts
 
       - name: Export Android bundle
         run: npx expo export --platform android --output-dir dist
