@@ -18,6 +18,7 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const BUCKET = process.env.RJ_RENDER_BUCKET ?? "rj-renders";
 const POLL_MS = Math.max(5_000, Number(process.env.RJ_RENDER_POLL_MS ?? 15_000));
 const BATCH_SIZE = Math.max(1, Math.min(5, Number(process.env.RJ_RENDER_BATCH_SIZE ?? 2)));
+const DenoLikeOneShot = process.env.RJ_ONESHOT === "true";
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
   throw new Error("Renderer requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
@@ -108,7 +109,7 @@ async function loadReadyStages(db: SupabaseClient): Promise<StageRow[]> {
   const { data, error } = await db.from("job_stages")
     .select("job_id,user_id,stage_key,attempt_count")
     .in("stage_key", ["scene_assets", "youtube_upload"])
-    .in("status", ["pending", "queued", "waiting_retry", "blocked"])
+    .in("status", ["pending", "queued", "waiting_retry"])
     .lte("run_after", new Date().toISOString())
     .order("run_after", { ascending: true })
     .limit(BATCH_SIZE);
@@ -854,7 +855,12 @@ async function sleep(ms: number) {
 }
 
 async function main() {
-  log("worker_started", { poll_ms: POLL_MS, batch_size: BATCH_SIZE, bucket: BUCKET });
+  log("worker_started", { poll_ms: POLL_MS, batch_size: BATCH_SIZE, bucket: BUCKET, one_shot: DenoLikeOneShot });
+  if (DenoLikeOneShot) {
+    await pollOnce(supabase);
+    log("one_shot_finished", { active_job: activeJob });
+    return;
+  }
   while (!stopping) {
     try {
       await pollOnce(supabase);
