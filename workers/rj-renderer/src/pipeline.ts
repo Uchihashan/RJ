@@ -127,14 +127,48 @@ export function formatSrtTime(totalSeconds: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")},${String(millis).padStart(3, "0")}`;
 }
 
-export function buildSrt(scenes: StoryScene[]): string {
+export function buildSrt(scenes: StoryScene[], durations?: number[]): string {
   let cursor = 0;
   return scenes.map((scene, index) => {
-    const duration = sceneDurationSeconds(scene);
+    const duration = durations?.[index] ?? sceneDurationSeconds(scene);
     const entry = `${index + 1}\n${formatSrtTime(cursor)} --> ${formatSrtTime(cursor + duration)}\n${scene.text}\n`;
     cursor += duration;
     return entry;
   }).join("\n");
+}
+
+export function buildSceneOverlaySvg(input: {
+  title: string;
+  topic: string;
+  body: string;
+  index: number;
+  total: number;
+}): string {
+  const titleLines = wrapText(input.title || `Scene ${input.index + 1}`, 34, 2);
+  const bodyLines = wrapText(input.body, 54, 4);
+  const titleSvg = titleLines.map((line, index) =>
+    `<text x="82" y="${500 + index * 54}" class="title">${escapeXml(line)}</text>`
+  ).join("");
+  const bodyStart = 590 + Math.max(0, titleLines.length - 1) * 34;
+  const bodySvg = bodyLines.map((line, index) =>
+    `<text x="84" y="${bodyStart + index * 30}" class="body">${escapeXml(line)}</text>`
+  ).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+    <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset="0.45" stop-color="#000000" stop-opacity=".18"/><stop offset="1" stop-color="#000000" stop-opacity=".88"/></linearGradient></defs>
+    <rect width="1280" height="720" fill="url(#shade)"/>
+    <rect x="82" y="466" width="8" height="190" rx="4" fill="#facc15"/>
+    <text x="84" y="54" class="eyebrow">${escapeXml(input.topic.slice(0, 80))}</text>
+    ${titleSvg}${bodySvg}
+    <text x="84" y="690" class="footer">RJ STORY STUDIO</text>
+    <text x="1196" y="690" text-anchor="end" class="footer">${input.index + 1} / ${input.total}</text>
+    <style>
+      text { font-family: "Noto Sans Tamil", "Noto Sans", sans-serif; }
+      .eyebrow { fill: #ffffff; font-size: 21px; font-weight: 700; }
+      .title { fill: #ffffff; font-size: 43px; font-weight: 800; }
+      .body { fill: #ffffff; font-size: 25px; }
+      .footer { fill: #eeeeee; font-size: 16px; letter-spacing: 2px; }
+    </style>
+  </svg>`;
 }
 
 export function buildSceneSvg(input: {
