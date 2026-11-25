@@ -33,6 +33,7 @@ function jobStatusLabel(row: any): string {
   if (row.status === "running") return "Generating story…";
   if (row.status === "waiting_retry") return "Provider busy — automatic retry scheduled";
   if (row.status === "paused" && row.error_code === "provider_not_configured") return "Paused — AI provider key needed";
+  if (row.status === "paused" && row.error_code === "paid_provider_consent_required") return "Paused — paid provider needs spending controls";
   if (row.status === "paused") return "Paused";
   if (row.status === "completed") return "Completed";
   if (row.status === "failed") return "Failed — check settings and try again";
@@ -787,7 +788,7 @@ export default function App() {
         <ActionButton title="Sign out of RJ" onPress={signOut} secondary />
       </View>
       <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>Free AI story providers</Text>
+        <Text style={styles.sectionTitle}>AI providers & spending policy</Text>
         <Text style={styles.listLine}>Gemini: <Text style={providerStatus.gemini ? { color: "#53C98B", fontWeight: "700" } : styles.pending}>{providerStatus.gemini ? "Key stored securely" : "Not connected"}</Text></Text>
         <Pressable onPress={() => Linking.openURL("https://aistudio.google.com/apikey")}><Text style={{ color: RED, marginBottom: 10 }}>Get a free Gemini API key ↗</Text></Pressable>
         <Field label="Gemini API key" value={geminiKeyInput} onChangeText={setGeminiKeyInput} placeholder="Paste Gemini API key" secureTextEntry />
@@ -797,7 +798,7 @@ export default function App() {
         <Pressable onPress={() => Linking.openURL("https://openrouter.ai/settings/keys")}><Text style={{ color: RED, marginBottom: 10 }}>Get an OpenRouter API key ↗</Text></Pressable>
         <Field label="OpenRouter API key" value={openRouterKeyInput} onChangeText={setOpenRouterKeyInput} placeholder="Paste OpenRouter API key" secureTextEntry />
         <ActionButton title={providerBusy === "openrouter" ? "Saving…" : "Save OpenRouter key"} onPress={() => saveProviderKey("openrouter", openRouterKeyInput)} disabled={providerBusy !== null} />
-        <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ uses Gemini first, then OpenRouter's free-model router. Free-tier quotas apply; paid models are not called automatically.</Text>
+        <Text style={styles.note}>Keys are encrypted in Supabase Vault and never saved in the app or GitHub. RJ prefers OpenRouter's free-model route. Gemini keys can be stored securely, but Gemini is not used automatically because billing depends on account tier. Paid routing stays disabled until per-request cost metering and spend enforcement are implemented.</Text>
       </View>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Other connections</Text>
