@@ -21,7 +21,7 @@ import ToolHubScreen from "./src/components/ToolHubScreen";
 import AssistantScreen from "./src/components/AssistantScreen";
 import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
-type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
+type Tab = "Home" | "Chat" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
 type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; sceneAssetCount?: number; hasNarration?: boolean; youtubeVideoId?: string };
 type PipelineStage = { job_id: string; stage_key: string; stage_order: number; status: string; selected_provider?: string | null; error_message?: string | null };
 const PIPELINE_STAGE_LABELS: Record<string, string> = { brief: "Brief", script_storyboard: "Story & script", scene_assets: "Visual scenes", voice_audio: "Voice-over", captions: "Captions", timeline_edit: "Timeline edit", render_export: "Render video", quality_check: "Quality check", metadata_thumbnail: "Title & thumbnail", youtube_upload: "YouTube upload", youtube_schedule_verify: "Schedule verification" };
@@ -751,7 +751,14 @@ export default function App() {
         <Text style={styles.heroSub}>உங்கள் அடுத்த வேலையைச் சொல்லுங்கள்.</Text>
         <Text style={styles.heroSub}>Tell RJ what you want to get done today.</Text>
       </View>
-      <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={async (value) => { setTab(value as Tab); return value + " screen திறக்கப்பட்டது."; }} onBeginAgentAction={beginAgentAction} onFinishAgentAction={finishAgentAction} />
+      <Pressable accessibilityRole="button" onPress={() => setTab("Chat")} style={styles.chatLaunch}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.eyebrow}>RJ CENTRAL BRAIN</Text>
+          <Text style={styles.sectionTitle}>Talk to RJ</Text>
+          <Text style={styles.muted}>தமிழ் • Tanglish • English — Chat with your AI assistant</Text>
+        </View>
+        <Text style={styles.chatLaunchArrow}>→</Text>
+      </Pressable>
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.quickRow}>
@@ -1006,32 +1013,47 @@ export default function App() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <StatusBar style="light" />
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text>
-          <Text style={styles.headerCaption}>YOUR PERSONAL WORKSPACE</Text>
+      {tab === "Chat" ? (
+        <View style={styles.fullChatScreen}>
+          <View style={styles.chatTopBar}>
+            <Pressable accessibilityRole="button" onPress={() => setTab("Home")} style={styles.chatBackButton}>
+              <Text style={styles.chatBackText}>‹  HOME</Text>
+            </Pressable>
+            <Text style={styles.chatTopTitle}>RJ AI CHAT</Text>
+            <View style={{ width: 76 }} />
+          </View>
+          <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={async (value) => { setTab(value as Tab); return value + " screen திறக்கப்பட்டது."; }} onBeginAgentAction={beginAgentAction} onFinishAgentAction={finishAgentAction} />
         </View>
-        <View style={styles.liveDot}><View style={styles.dot} /><Text style={styles.liveText}>READY</Text></View>
-      </View>
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
-        {tab === "Home" && renderHome()}
-        {tab === "Create" && renderCreate()}
-        {tab === "Edit" && <VideoEditorScreen projects={jobs} onSave={saveProjectEdits} />}
-        {tab === "Tools" && <ToolHubScreen geminiConnected={!!providerStatus.gemini} openRouterConnected={!!providerStatus.openrouter} onOpenSettings={() => setTab("Settings")} />}
-        {tab === "Schedule" && renderSchedule()}
-        {tab === "Settings" && renderSettings()}
-      </ScrollView>
-      <View style={styles.tabBar}>
-        {(["Home", "Create", "Edit", "Tools", "Schedule", "Settings"] as Tab[]).map(item => (
-          <Pressable key={item} onPress={() => setTab(item)} style={styles.tabItem}>
-            <Text style={[styles.tabIcon, tab === item && { color: RED }]}>{item === "Home" ? "⌂" : item === "Create" ? "＋" : item === "Edit" ? "✎" : item === "Tools" ? "◇" : item === "Schedule" ? "◷" : "⚙"}</Text>
-            <Text style={[styles.tabLabel, tab === item && { color: "#FFFFFF" }]}>{item}</Text>
-            {tab === item && <View style={styles.tabUnderline} />}
-          </Pressable>
-        ))}
-      </View>
+      ) : (
+        <>
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.brand}>RJ<Text style={{ color: RED }}>.</Text></Text>
+              <Text style={styles.headerCaption}>YOUR PERSONAL WORKSPACE</Text>
+            </View>
+            <View style={styles.liveDot}><View style={styles.dot} /><Text style={styles.liveText}>READY</Text></View>
+          </View>
+          <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
+            {tab === "Home" && renderHome()}
+            {tab === "Create" && renderCreate()}
+            {tab === "Edit" && <VideoEditorScreen projects={jobs} onSave={saveProjectEdits} />}
+            {tab === "Tools" && <ToolHubScreen geminiConnected={!!providerStatus.gemini} openRouterConnected={!!providerStatus.openrouter} onOpenSettings={() => setTab("Settings")} />}
+            {tab === "Schedule" && renderSchedule()}
+            {tab === "Settings" && renderSettings()}
+          </ScrollView>
+          <View style={styles.tabBar}>
+            {(["Home", "Create", "Edit", "Tools", "Schedule", "Settings"] as Tab[]).map(item => (
+              <Pressable key={item} onPress={() => setTab(item)} style={styles.tabItem}>
+                <Text style={[styles.tabIcon, tab === item && { color: RED }]}>{item === "Home" ? "⌂" : item === "Create" ? "＋" : item === "Edit" ? "✎" : item === "Tools" ? "◇" : item === "Schedule" ? "◷" : "⚙"}</Text>
+                <Text style={[styles.tabLabel, tab === item && { color: "#FFFFFF" }]}>{item}</Text>
+                {tab === item && <View style={styles.tabUnderline} />}
+              </Pressable>
+            ))}
+          </View>
+        </>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -1046,6 +1068,13 @@ const styles = StyleSheet.create({
   dot: { width: 7, height: 7, borderRadius: 5, backgroundColor: RED },
   liveText: { color: "#DDDDDD", fontSize: 10, fontWeight: "700", letterSpacing: 1 },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 18 },
+  fullChatScreen: { flex: 1, paddingTop: Platform.OS === "android" ? 4 : 10, paddingHorizontal: 12 },
+  chatTopBar: { minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
+  chatBackButton: { minWidth: 76, minHeight: 40, justifyContent: "center" },
+  chatBackText: { color: "#FFFFFF", fontSize: 11, fontWeight: "900", letterSpacing: 1 },
+  chatTopTitle: { color: "#A3A3A3", fontSize: 10, fontWeight: "900", letterSpacing: 2 },
+  chatLaunch: { flexDirection: "row", alignItems: "center", backgroundColor: PANEL, borderRadius: 16, borderWidth: 1, borderColor: "#393939", padding: 16, marginBottom: 16 },
+  chatLaunchArrow: { color: RED, fontSize: 28, fontWeight: "700", marginLeft: 10 },
   hero: { paddingVertical: 20, paddingHorizontal: 4 },
   eyebrow: { color: RED, fontSize: 10, fontWeight: "800", letterSpacing: 2 },
   heroTitle: { color: "#FFFFFF", fontSize: 34, fontWeight: "900", marginTop: 8 },
