@@ -649,7 +649,8 @@ async function processYoutubeUpload(db: SupabaseClient, stage: StageRow): Promis
   }
 }
 
-async function processStage(db: SupabaseClient, stage: StageRow) {\n  if (stage.stage_key === "youtube_upload") return await processYoutubeUpload(db, stage);
+async function processStage(db: SupabaseClient, stage: StageRow) {
+  if (stage.stage_key === "youtube_upload") return await processYoutubeUpload(db, stage);
   if (!(await storyStageIsReady(db, stage.job_id))) return "story_not_ready";
   const claimed = await claimStage(db, stage);
   if (!claimed) return "already_claimed";
