@@ -68,6 +68,37 @@ async function callGemini(apiKey: string, messages: ChatMessage[]) {
   }
 }
 
+async function callGroqFree(apiKey: string, messages: ChatMessage[]) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-oss-20b",
+        messages: [
+          { role: "system", content: "You are RJ, a practical personal AI assistant. Reply in the user's language (Tamil, Tanglish, or English). Be honest about actions and ask before paid or external actions." },
+          ...messages.slice(-16),
+        ],
+        temperature: 0.7,
+        max_tokens: 1800,
+      }),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data?.error?.message ?? "Groq Free-tier request failed (" + res.status + ")"), { status: res.status });
+    const answer = String(data?.choices?.[0]?.message?.content ?? "").trim();
+    if (!answer) throw Object.assign(new Error("RJ received an empty response from Groq"), { status: 502 });
+    return answer;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callOpenRouter(apiKey: string, messages: ChatMessage[]) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -140,10 +171,10 @@ Deno.serve(async (req: Request) => {
   if (healthError) return json({ error: "RJ could not load provider availability." }, 503);
   const providers = selectEligibleProviders("text", keys, (healthRows ?? []) as ProviderHealth[], policy);
   if (!providers.length) {
-    const paidConsentNeeded = keys.has("gemini") && !policy.allowPaidProviders && !keys.has("openrouter");
+    const paidConsentNeeded = keys.has("gemini") && !policy.allowPaidProviders && !keys.has("openrouter") && !keys.has("groq");
     return json({
       error: paidConsentNeeded
-        ? "Gemini may be billable on your account. RJ will not use it until paid-provider cost metering and explicit spending controls are ready. Connect OpenRouter's free router for now."
+        ? "Gemini may be billable on your account. RJ will not use it until paid-provider cost metering and explicit spending controls are ready. Connect OpenRouter Free or Groq Free for now."
         : "AI provider not connected or currently cooling down. Connect a free text provider in RJ Settings.",
       code: paidConsentNeeded ? "paid_provider_consent_required" : "provider_unavailable",
     }, paidConsentNeeded ? 402 : 424);
@@ -165,7 +196,9 @@ Deno.serve(async (req: Request) => {
     try {
       const reply = provider.key === "gemini"
         ? await callGemini(keys.get("gemini")!, clean)
-        : await callOpenRouter(keys.get("openrouter")!, clean);
+        : provider.key === "groq_free"
+          ? await callGroqFree(keys.get("groq")!, clean)
+          : await callOpenRouter(keys.get("openrouter")!, clean);
       const now = new Date().toISOString();
       await admin.from("provider_health").upsert({
         user_id: authData.user.id, provider_key: provider.key, capability: "text",
