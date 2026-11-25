@@ -73,3 +73,23 @@ Deno.test("speech adapter remains disabled until spend enforcement exists", () =
     throw new Error("Gemini TTS must not execute while account billing cannot be enforced");
   }
 });
+
+Deno.test("paid image and video generation stay disabled even when a budget is present", () => {
+  const keys = new Map([["gemini", "secret"]]);
+  const policy = { allowPaidProviders: true, monthlyBudgetUsd: 100 };
+  const images = selectEligibleProviders("image", keys, [], policy);
+  const videos = selectEligibleProviders("video", keys, [], policy);
+  if (images.length !== 0 || videos.length !== 0) {
+    throw new Error("Image/video providers must remain disabled until spend enforcement is implemented");
+  }
+});
+
+Deno.test("FFmpeg rendering does not require a paid provider credential", () => {
+  const selected = selectEligibleProviders("render", new Map(), [], {
+    allowPaidProviders: false,
+    monthlyBudgetUsd: 0,
+  });
+  if (selected.length !== 0) {
+    throw new Error("The worker uses the local FFmpeg binary rather than a paid API provider");
+  }
+});
