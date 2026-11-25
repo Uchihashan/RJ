@@ -412,6 +412,21 @@ export default function App() {
     if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? "RJ could not complete the action audit.");
   };
 
+  const uploadYoutubeFromChat = async (jobId: string): Promise<string> => {
+    if (!supabase) throw new Error("RJ cloud connection is unavailable.");
+    const job = jobs.find(item => item.id === jobId && !!item.renderPath && !item.youtubeVideoId);
+    if (!job) throw new Error("இந்த project-க்கு rendered video இல்லை அல்லது ஏற்கெனவே upload செய்யப்பட்டுள்ளது.");
+    setYoutubeUploadingJobId(jobId);
+    try {
+      const { data, error } = await supabase.functions.invoke("rj-youtube-publish", { body: { job_id: jobId } });
+      if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? "YouTube upload failed.");
+      const videoId = String(data.video_id);
+      setJobs(current => current.map(item => item.id === jobId ? { ...item, youtubeVideoId: videoId } : item));
+      return "YouTube upload முடிந்தது. Video PRIVATE-ஆக upload செய்யப்பட்டது: https://www.youtube.com/watch?v=" + videoId;
+    } finally {
+      setYoutubeUploadingJobId(null);
+    }
+  };
 
   const approveYoutubeUpload = (job: Job) => {
     Alert.alert(
@@ -1024,7 +1039,7 @@ export default function App() {
             <Text style={styles.chatTopTitle}>RJ AI CHAT</Text>
             <View style={{ width: 76 }} />
           </View>
-          <AssistantScreen onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={async (value) => { setTab(value as Tab); return value + " screen திறக்கப்பட்டது."; }} onBeginAgentAction={beginAgentAction} onFinishAgentAction={finishAgentAction} />
+          <AssistantScreen projects={jobs.filter(job => !!job.renderPath && !job.youtubeVideoId).map(job => ({ id: job.id, topic: job.topic, renderPath: job.renderPath, youtubeVideoId: job.youtubeVideoId }))} onUploadYoutube={uploadYoutubeFromChat} onCreateVideoProject={(value) => createJob(value, language)} onCreateReminder={addReminder} onNavigate={async (value) => { setTab(value as Tab); return value + " screen திறக்கப்பட்டது."; }} onBeginAgentAction={beginAgentAction} onFinishAgentAction={finishAgentAction} />
         </View>
       ) : (
         <>
