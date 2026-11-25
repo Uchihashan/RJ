@@ -179,3 +179,25 @@ This status supersedes earlier audit bullets where they conflict.
 - Explicit per-user paid-provider budget approval before any non-free generation or rendering is attempted.
 
 Do not describe RJ as a completed autonomous video publisher until the remaining items above are implemented, deployed with approval, and end-to-end tested.
+
+
+## Provider routing implementation update — 2026-11-25
+
+Implemented on feature/rj-full-integration (not deployed):
+
+- Added a typed provider registry with explicit capability matching. Current executable adapters are text-only: OpenRouter's free-model route and Gemini.
+- Added a capability catalog for text, image, video, speech, transcription, captions, media assembly, rendering, storage, YouTube upload/scheduling, and media analysis. The catalog does not pretend that missing adapters exist.
+- Added per-user provider policy records. Paid use is disabled by default; account-dependent Gemini billing is not treated as free.
+- Added provider attempt history with capability, provider/model, stage, status, HTTP status, safe error summary, and optional cost fields. No prompt bodies or credentials are written to this audit table.
+- Updated assistant and story worker to select only providers compatible with the requested capability, prefer free routing, respect provider cooldowns, and record provider attempts.
+- Added tests for free-only routing, compatible fallback ordering, capability mismatch, cooldown filtering, quota classification, and invalid credentials.
+
+Important cost-safety limitation:
+- Paid provider execution remains blocked in the app/worker until reliable per-request cost measurement and budget enforcement are implemented. A monthly budget field is policy metadata, not proof of spend enforcement; RJ does not expose a paid-enable control or claim a hard spend cap yet.
+- Gemini may be billable depending on the user's Google AI account tier. The worker will not silently use it. OpenRouter's free-model route remains the only currently eligible default text adapter.
+- The registry describes future pipeline capabilities, but image/video/speech/caption/render/storage/YouTube adapters are not implemented by this change.
+
+Verification:
+- CI now runs Deno checks and the provider-registry unit tests, in addition to the Expo/browser checks.
+- Hosted Supabase migrations and Edge Functions remain undeployed. The new migration must be applied before the updated assistant/worker functions can use the policy and attempt-history tables.
+- No main merge, production deploy, or APK build was performed.
