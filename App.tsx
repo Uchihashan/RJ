@@ -158,10 +158,17 @@ export default function App() {
   useEffect(() => {
     if (!authReady || !dataLoaded) return;
     if (!session || !supabase) {
-      setJobs([]);
+      let active = true;
       setJobStages({});
-      setJobsOwnerId(null);
-      return;
+      AsyncStorage.getItem("rj_video_jobs_local").then(saved => {
+        if (!active) return;
+        const localJobs = saved ? JSON.parse(saved) as Job[] : [];
+        setJobs(localJobs);
+        setJobsOwnerId("local");
+      }).catch(() => {
+        if (active) { setJobs([]); setJobsOwnerId("local"); }
+      });
+      return () => { active = false; };
     }
     let active = true;
     setJobs([]);
@@ -308,6 +315,7 @@ export default function App() {
     if (!dataLoaded || !authReady) return;
     const writes: [string, string][] = [["rj_reminders", JSON.stringify(reminders)]];
     if (session && jobsOwnerId === session.user.id) writes.push(["rj_video_jobs_" + session.user.id, JSON.stringify(jobs)]);
+    else if (!session && jobsOwnerId === "local") writes.push(["rj_video_jobs_local", JSON.stringify(jobs)]);
     AsyncStorage.multiSet(writes).catch(() => Alert.alert("Storage issue", "RJ could not save local project data."));
   }, [jobs, reminders, dataLoaded, authReady, session, jobsOwnerId]);
 
@@ -343,6 +351,7 @@ export default function App() {
         return "Cloud queue-க்கு project அனுப்ப முடியவில்லை. Internet connection சரிபார்த்து மீண்டும் முயற்சி செய்யுங்கள்.";
       }
     }
+    if (!cloudQueueAvailable) setJobsOwnerId("local");
     setJobs(current => [item, ...current]);
     setTopic("");
     if (cloudQueueAvailable) {
