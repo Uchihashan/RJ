@@ -62,6 +62,18 @@ export const PROVIDER_CATALOG: readonly ProviderSpec[] = [
     // Disabled until RJ can measure and enforce a hard per-user spend limit.
     enabled: false,
   },
+  {
+    key: "gemini_tts",
+    label: "Google Gemini 3.8 Flash TTS",
+    capability: "speech",
+    model: "gemini-3.8-flash-tts",
+    pricingMode: "account_dependent",
+    outputFormats: ["audio/wav"],
+    credentialKey: "gemini",
+    // Google lists a free tier, but API projects can be on a billable tier.
+    // Keep disabled until RJ can enforce project-tier and per-request spend controls.
+    enabled: false,
+  },
 ];
 
 export type RoutingPolicy = {
