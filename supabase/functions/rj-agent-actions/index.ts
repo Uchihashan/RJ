@@ -141,7 +141,7 @@ Deno.serve(async (req: Request) => {
     if (confirmError) return json({ error: "RJ could not confirm the action audit; no action was run." }, 500);
     if (tool === "youtube.upload") {
       const { error: stageError } = await admin.from("job_stages").update({
-        status: "pending", error_code: null, error_message: null, run_after: new Date().toISOString(),
+        status: "pending", locked_at: null, error_code: null, error_message: null, run_after: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }).eq("job_id", String(args.job_id)).eq("user_id", user.id).eq("stage_key", "youtube_upload");
       if (stageError) return json({ error: "Approval was recorded, but RJ could not queue the upload stage." }, 500);
