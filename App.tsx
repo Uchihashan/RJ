@@ -869,6 +869,7 @@ export default function App() {
           ["video.create", "Create video project"],
           ["reminder.create", "Save reminder"],
           ["navigation.open", "Open app screens"],
+          ["youtube.upload", "Upload approved video privately to YouTube"],
         ] as [AgentToolKey, string][]).map(([key, label]) => (
           <View key={key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9 }}>
             <View style={{ flex: 1, paddingRight: 10 }}>
