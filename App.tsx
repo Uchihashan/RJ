@@ -22,12 +22,17 @@ import AssistantScreen from "./src/components/AssistantScreen";
 import VideoEditorScreen from "./src/components/VideoEditorScreen";
 
 type Tab = "Home" | "Create" | "Edit" | "Tools" | "Schedule" | "Settings";
-type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string };
+type Job = { id: string; topic: string; language: string; createdAt: string; status: string; story?: string; description?: string; aspectRatio?: string; captionsEnabled?: boolean; renderPath?: string; thumbnailPath?: string; captionsPath?: string; renderDuration?: number; renderMode?: string; generatedImageCount?: number; hasNarration?: boolean };
 type PipelineStage = { job_id: string; stage_key: string; stage_order: number; status: string; selected_provider?: string | null; error_message?: string | null };
 const PIPELINE_STAGE_LABELS: Record<string, string> = { brief: "Brief", script_storyboard: "Story & script", scene_assets: "Visual scenes", voice_audio: "Voice-over", captions: "Captions", timeline_edit: "Timeline edit", render_export: "Render video", quality_check: "Quality check", metadata_thumbnail: "Title & thumbnail", youtube_upload: "YouTube upload", youtube_schedule_verify: "Schedule verification" };
 
 function jobStatusLabel(row: any): string {
-  if (row.output?.stage === "rendered") return "Video rendered — silent storyboard (AI voice/images not enabled)";
+  if (row.output?.stage === "rendered") {
+    const render = row.output?.render ?? {};
+    const audioLabel = render.audio === true ? "Tamil narration" : "no narration";
+    const visualLabel = Number(render.generated_image_count ?? 0) > 0 ? "AI-generated images" : "local scene artwork";
+    return `Video rendered — ${audioLabel}, ${visualLabel}`;
+  }
   if (row.status === "blocked") return row.current_stage === "scene_assets" ? "Story saved — waiting for image/video provider" : "Blocked — connect the required provider";
   if (row.output?.stage === "story_ready") return "Story ready — voice, visuals and rendering still pending";
   if (row.status === "queued") return "Queued — RJ worker will check providers";
@@ -215,7 +220,9 @@ export default function App() {
         thumbnailPath: typeof row.output?.render?.thumbnail_path === "string" ? row.output.render.thumbnail_path : undefined,
         captionsPath: typeof row.output?.render?.captions_path === "string" ? row.output.render.captions_path : undefined,
         renderDuration: typeof row.output?.render?.duration_seconds === "number" ? row.output.render.duration_seconds : undefined,
-        renderMode: typeof row.output?.render?.visual_mode === "string" ? row.output.render.visual_mode : undefined
+        renderMode: typeof row.output?.render?.visual_mode === "string" ? row.output.render.visual_mode : undefined,
+        generatedImageCount: typeof row.output?.render?.generated_image_count === "number" ? row.output.render.generated_image_count : undefined,
+        hasNarration: row.output?.render?.audio === true
       }));
       const merged = [...remoteJobs, ...localJobs.filter(local => !remoteJobs.some(remote => remote.id === local.id))];
       if (active) {
@@ -724,7 +731,7 @@ export default function App() {
           {job.renderPath ? (
             <View style={{ marginTop: 10 }}>
               <Text style={styles.muted}>
-                {job.renderDuration ? Math.round(job.renderDuration) + " sec" : "Rendered"} • {job.renderMode === "vector_story_cards" ? "Text-led scene cards" : "Video"}
+                {job.renderDuration ? Math.round(job.renderDuration) + " sec" : "Rendered"} • {job.generatedImageCount ? job.generatedImageCount + " AI images" : "Local scene artwork"} • {job.hasNarration ? "Tamil narration" : "No narration"}
               </Text>
               <Pressable onPress={async () => {
                 if (!supabase) return;
