@@ -62,3 +62,14 @@ Deno.test("invalid credentials do not trigger blind retries", () => {
     throw new Error("401 must require attention, not cooldown retry");
   }
 });
+
+Deno.test("speech adapter remains disabled until spend enforcement exists", () => {
+  const keys = new Map([["gemini", "secret"]]);
+  const selected = selectEligibleProviders("speech", keys, [], {
+    allowPaidProviders: true,
+    monthlyBudgetUsd: 100,
+  });
+  if (selected.length !== 0) {
+    throw new Error("Gemini TTS must not execute while account billing cannot be enforced");
+  }
+});
