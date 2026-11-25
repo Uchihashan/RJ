@@ -29,6 +29,7 @@ function jobStatusLabel(row: any): string {
   if (row.status === "queued") return "Queued — RJ worker will check providers";
   if (row.status === "running") return "Generating story…";
   if (row.status === "waiting_retry") return "Provider busy — automatic retry scheduled";
+  if (row.status === "blocked") return row.current_stage === "scene_assets" ? "Story saved — waiting for image/video provider" : "Blocked — connect the required provider";
   if (row.status === "paused" && row.error_code === "provider_not_configured") return "Paused — AI provider key needed";
   if (row.status === "paused") return "Paused";
   if (row.status === "completed") return "Completed";
